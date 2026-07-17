@@ -58,15 +58,17 @@ static async Task<int> RunConvert(string[] args)
     var outputPath = options.GetValueOrDefault("--output") ?? Path.ChangeExtension(inputPath, ".epub");
     var dpi = ParseDpi(options);
     var ollamaOptions = ParseOllamaOptions(options);
+    if (!TryParseLayout(options, out var layout))
+    {
+        return 1;
+    }
 
     var workDirectory = Path.Combine(Path.GetTempPath(), $"epubfabric-{Guid.NewGuid():N}");
-    var (project, pages) = await BuildProjectFromPdf(inputPath, workDirectory, dpi, ollamaOptions);
+    var (project, _) = await BuildProjectFromPdf(inputPath, workDirectory, dpi, ollamaOptions);
 
-    var chapters = new DocumentBuilder().BuildChapters(pages, project.Title);
-    var blocksById = pages.SelectMany(p => p.Blocks).ToDictionary(b => b.Id);
-    new EpubPackageBuilder().Build(project, chapters, blocksById, outputPath);
+    BuildEpub(project, layout, outputPath);
 
-    Console.WriteLine($"EPUBを生成しました: {outputPath}");
+    Console.WriteLine($"{LayoutLabel(layout)}EPUBを生成しました: {outputPath}");
     return 0;
 }
 
@@ -193,8 +195,12 @@ static int RunExport(string[] args)
     var outputPath = options.GetValueOrDefault("--output")
         ?? Path.ChangeExtension(projectDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), ".epub");
 
+    if (!TryParseLayout(options, out var layout))
+    {
+        return 1;
+    }
+
     var project = new EfprojStore().Load(projectDirectory);
-    var chapters = new DocumentBuilder().BuildChapters(project.Pages, project.Title);
     var blocksById = project.Pages.SelectMany(p => p.Blocks).ToDictionary(b => b.Id);
 
     var correctedCount = blocksById.Values.Count(b => b.IsManuallyEdited);
@@ -203,11 +209,47 @@ static int RunExport(string[] args)
         Console.WriteLine($"{correctedCount} 件の校正済みブロックを反映します。");
     }
 
-    new EpubPackageBuilder().Build(project, chapters, blocksById, outputPath);
+    BuildEpub(project, layout, outputPath);
 
-    Console.WriteLine($"EPUBを生成しました: {outputPath}");
+    Console.WriteLine($"{LayoutLabel(layout)}EPUBを生成しました: {outputPath}");
     return 0;
 }
+
+static void BuildEpub(EpubFabricProject project, OutputLayout layout, string outputPath)
+{
+    if (layout == OutputLayout.Fixed)
+    {
+        new FixedLayoutEpubPackageBuilder().Build(project, outputPath);
+        return;
+    }
+
+    var chapters = new DocumentBuilder().BuildChapters(project.Pages, project.Title);
+    var blocksById = project.Pages.SelectMany(p => p.Blocks).ToDictionary(b => b.Id);
+    new EpubPackageBuilder().Build(project, chapters, blocksById, outputPath);
+}
+
+static bool TryParseLayout(Dictionary<string, string> options, out OutputLayout layout)
+{
+    var value = options.GetValueOrDefault("--layout", "fixed");
+    if (string.Equals(value, "fixed", StringComparison.OrdinalIgnoreCase))
+    {
+        layout = OutputLayout.Fixed;
+        return true;
+    }
+
+    if (string.Equals(value, "reflow", StringComparison.OrdinalIgnoreCase))
+    {
+        layout = OutputLayout.Reflow;
+        return true;
+    }
+
+    layout = default;
+    Console.Error.WriteLine($"エラー: --layout は fixed または reflow を指定してください（指定値: {value}）。");
+    return false;
+}
+
+static string LayoutLabel(OutputLayout layout) =>
+    layout == OutputLayout.Fixed ? "固定レイアウト" : "リフロー型";
 
 static int RunInfo(string[] args)
 {
@@ -457,14 +499,21 @@ static void PrintUsage()
 {
     Console.WriteLine("使い方:");
     Console.WriteLine("  epubfabric info <input.pdf>");
-    Console.WriteLine("  epubfabric convert <input.pdf> [--output <output.epub>] [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
+    Console.WriteLine("  epubfabric convert <input.pdf> [--output <output.epub>] [--layout <fixed|reflow>] [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric evaluate <input.pdf> [--report <report-dir>] [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric analyze <input.pdf> --project <book.efproj> [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
-    Console.WriteLine("  epubfabric export <book.efproj> --format epub [--output <output.epub>]");
+    Console.WriteLine("  epubfabric export <book.efproj> --format epub [--output <output.epub>] [--layout <fixed|reflow>]");
     Console.WriteLine();
+    Console.WriteLine("  convert/export は固定レイアウトEPUBを生成します。従来のリフロー型は --layout reflow で選択できます。");
     Console.WriteLine("  evaluate はEPUBを生成せず、ページ画像+検出ブロックと生成されるEPUB断片を左右対照したHTMLレポート（index.html）と定量メトリクス（metrics.json）を出力します。");
     Console.WriteLine("  --ollama を指定すると、Ollamaによる意味分類（見出し・本文などの補正）を行います（既定では無効）。");
     Console.WriteLine("  --ollama-model の既定値: gemma4:12b / --ollama-endpoint の既定値: http://localhost:11434");
 }
 
 sealed record OllamaOptions(bool Enabled, string Endpoint, string Model);
+
+enum OutputLayout
+{
+    Fixed,
+    Reflow,
+}
