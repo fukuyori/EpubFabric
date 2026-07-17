@@ -33,6 +33,12 @@ public sealed class EpubPackageBuilder
 
         File.Delete(outputEpubPath);
 
+        var images = blocksById.Values
+            .Where(b => b.Type == BlockType.Figure && b.ExtractedImagePath is not null)
+            .Select(b => b.ExtractedImagePath!)
+            .Distinct()
+            .ToList();
+
         using var zip = ZipFile.Open(outputEpubPath, ZipArchiveMode.Create);
 
         // mimetypeは無圧縮でZIP先頭に配置する（12.7）。
@@ -43,7 +49,7 @@ public sealed class EpubPackageBuilder
         }
 
         WriteXml(zip, "META-INF/container.xml", BuildContainerXml());
-        WriteXml(zip, "EPUB/package.opf", BuildPackageOpf(project, chapters));
+        WriteXml(zip, "EPUB/package.opf", BuildPackageOpf(project, chapters, images));
         WriteXml(zip, "EPUB/nav.xhtml", BuildNavXhtml(project.Title, chapters));
         WriteText(zip, "EPUB/styles/book.css", EpubStylesheet.Content);
 
@@ -52,9 +58,21 @@ public sealed class EpubPackageBuilder
             var chapterXhtml = _xhtmlGenerator.GenerateChapter(chapters[i], blocksById);
             WriteXml(zip, $"EPUB/text/{ChapterFileName(i)}", chapterXhtml);
         }
+
+        foreach (var imagePath in images)
+        {
+            zip.CreateEntryFromFile(imagePath, $"EPUB/images/{Path.GetFileName(imagePath)}", CompressionLevel.Optimal);
+        }
     }
 
     private static string ChapterFileName(int index) => $"chapter-{index + 1:000}.xhtml";
+
+    private static string ImageMediaType(string fileName) => Path.GetExtension(fileName).ToLowerInvariant() switch
+    {
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".webp" => "image/webp",
+        _ => "image/png",
+    };
 
     private static XDocument BuildContainerXml()
     {
@@ -73,13 +91,23 @@ public sealed class EpubPackageBuilder
                         new XAttribute("media-type", "application/oebps-package+xml")))));
     }
 
-    private static XDocument BuildPackageOpf(EpubFabricProject project, IReadOnlyList<DocumentChapter> chapters)
+    private static XDocument BuildPackageOpf(EpubFabricProject project, IReadOnlyList<DocumentChapter> chapters, IReadOnlyList<string> images)
     {
         var manifestItems = new List<XElement>
         {
             new(Opf + "item", new XAttribute("id", "nav"), new XAttribute("href", "nav.xhtml"), new XAttribute("media-type", "application/xhtml+xml"), new XAttribute("properties", "nav")),
             new(Opf + "item", new XAttribute("id", "css"), new XAttribute("href", "styles/book.css"), new XAttribute("media-type", "text/css")),
         };
+
+        for (var i = 0; i < images.Count; i++)
+        {
+            var fileName = Path.GetFileName(images[i]);
+            manifestItems.Add(new XElement(
+                Opf + "item",
+                new XAttribute("id", $"image-{i + 1:000}"),
+                new XAttribute("href", $"images/{fileName}"),
+                new XAttribute("media-type", ImageMediaType(fileName))));
+        }
 
         var spineItems = new List<XElement>();
 

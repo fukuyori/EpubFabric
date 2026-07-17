@@ -16,5 +16,6 @@ public enum BlockType
     Header,
     Footer,
     PageNumber,
-    Decorative
+    Decorative,
+    Code
 }

@@ -2,6 +2,7 @@ using System.Text;
 using EpubFabric.Core.Models;
 using EpubFabric.Document;
 using EpubFabric.Epub;
+using EpubFabric.Imaging;
 using EpubFabric.Layout;
 using EpubFabric.Ocr;
 using EpubFabric.Pdf;
@@ -163,6 +164,8 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
 {
     var pdfService = new PdfDocumentService();
     var layoutAnalyzer = new HeuristicLayoutAnalyzer();
+    var regionDetector = new NonTextRegionDetector();
+    var figureExtractor = new FigureImageExtractor();
     var info = pdfService.GetInfo(inputPath);
 
     var pagesNeedingOcr = info.Pages.Count(p => !p.HasText);
@@ -219,7 +222,16 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
                     await ocrService.InitializeAsync(new OcrModelProvisioner());
 
                     var ocrResult = ocrService.RecognizePage(imagePath);
-                    pageBlocks = layoutAnalyzer.AnalyzePage(pageNumber, ocrResult.Lines);
+                    var textBounds = ocrResult.Lines.Select(l => l.Bounds).ToList();
+                    var regions = regionDetector.DetectRegions(imagePath, textBounds);
+                    pageBlocks = layoutAnalyzer.AnalyzePage(pageNumber, ocrResult.Lines, regions);
+
+                    foreach (var figureBlock in pageBlocks.Where(b => b.Type == BlockType.Figure))
+                    {
+                        var figureImagePath = Path.Combine(workDirectory, $"{figureBlock.Id}.png");
+                        figureExtractor.Extract(imagePath, figureBlock.Bounds, figureImagePath);
+                        figureBlock.ExtractedImagePath = figureImagePath;
+                    }
                 }
                 catch (Exception ex) when (ex is OcrModelDownloadException or InvalidOperationException)
                 {

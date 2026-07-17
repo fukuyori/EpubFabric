@@ -72,4 +72,89 @@ public class HeuristicLayoutAnalyzerTests
 
         Assert.Empty(blocks);
     }
+
+    [Fact]
+    public void AnalyzePage_LineInsideFigureRegion_IsDroppedNotDuplicatedAsBody()
+    {
+        // 図の内部にあるOCR行（図中のラベルなど）は、切り出した図画像に既に含まれる
+        // ため、別の本文段落として重複させてはならない。
+        var lines = new List<TextLine>
+        {
+            new(new BoundingBox(0.15, 0.15, 0.2, 0.02), "図中のラベル", 0.9),
+            new(new BoundingBox(0.1, 0.60, 0.6, 0.03), "図の外の本文です。", 0.9),
+        };
+        var regions = new List<NonTextRegion>
+        {
+            new(new BoundingBox(0.1, 0.10, 0.6, 0.30), NonTextRegionKind.Figure),
+        };
+
+        var blocks = _analyzer.AnalyzePage(pageNumber: 1, lines, regions);
+
+        Assert.DoesNotContain(blocks, b => b.OcrText == "図中のラベル");
+        Assert.Contains(blocks, b => b.OcrText == "図の外の本文です。");
+        Assert.Single(blocks, b => b.Type == BlockType.Figure);
+    }
+
+    [Fact]
+    public void AnalyzePage_FigureRegion_ProducesFigureBlockInReadingOrder()
+    {
+        var lines = new List<TextLine>
+        {
+            new(new BoundingBox(0.1, 0.60, 0.6, 0.03), "図の下の本文です。", 0.9),
+        };
+        var regions = new List<NonTextRegion>
+        {
+            new(new BoundingBox(0.1, 0.10, 0.6, 0.30), NonTextRegionKind.Figure),
+        };
+
+        var blocks = _analyzer.AnalyzePage(pageNumber: 1, lines, regions);
+
+        var figure = Assert.Single(blocks, b => b.Type == BlockType.Figure);
+        Assert.Equal(string.Empty, figure.OcrText);
+        Assert.True(figure.ReadingOrder < blocks.Single(b => b.Type == BlockType.Body).ReadingOrder);
+    }
+
+    [Fact]
+    public void AnalyzePage_LineInsideBoxedRegion_IsClassifiedAsAside()
+    {
+        var lines = new List<TextLine>
+        {
+            new(new BoundingBox(0.1, 0.10, 0.6, 0.03), "通常の本文です。", 0.9),
+            new(new BoundingBox(0.12, 0.30, 0.5, 0.03), "囲み記事内のテキストです。", 0.9),
+        };
+        var regions = new List<NonTextRegion>
+        {
+            new(new BoundingBox(0.1, 0.28, 0.6, 0.10), NonTextRegionKind.Boxed),
+        };
+
+        var blocks = _analyzer.AnalyzePage(pageNumber: 1, lines, regions);
+
+        Assert.Equal(BlockType.Body, blocks.Single(b => b.OcrText == "通常の本文です。").Type);
+        Assert.Equal(BlockType.Aside, blocks.Single(b => b.OcrText == "囲み記事内のテキストです。").Type);
+    }
+
+    [Fact]
+    public void AnalyzePage_ShortLineDirectlyBelowFigure_IsLinkedAsCaption()
+    {
+        var lines = new List<TextLine>
+        {
+            new(new BoundingBox(0.1, 0.42, 0.5, 0.025), "図1 実験結果のグラフ", 0.9),
+            new(new BoundingBox(0.1, 0.60, 0.6, 0.03), "本文が続きます。", 0.9),
+        };
+        var regions = new List<NonTextRegion>
+        {
+            new(new BoundingBox(0.1, 0.10, 0.6, 0.30), NonTextRegionKind.Figure),
+        };
+
+        var blocks = _analyzer.AnalyzePage(pageNumber: 1, lines, regions);
+
+        var figure = blocks.Single(b => b.Type == BlockType.Figure);
+        var caption = blocks.Single(b => b.OcrText == "図1 実験結果のグラフ");
+        var body = blocks.Single(b => b.OcrText == "本文が続きます。");
+
+        Assert.Equal(BlockType.Caption, caption.Type);
+        Assert.Equal(figure.Id, caption.RelatedBlockId);
+        Assert.Equal(BlockType.Body, body.Type);
+        Assert.Null(body.RelatedBlockId);
+    }
 }
