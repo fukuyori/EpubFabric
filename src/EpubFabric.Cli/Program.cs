@@ -1,8 +1,11 @@
+using System.Text;
 using EpubFabric.Core.Models;
 using EpubFabric.Document;
 using EpubFabric.Epub;
 using EpubFabric.Pdf;
 using EpubFabric.Persistence;
+
+Console.OutputEncoding = Encoding.UTF8;
 
 if (args.Length == 0)
 {
@@ -17,6 +20,7 @@ try
         "convert" => RunConvert(args),
         "analyze" => RunAnalyze(args),
         "export" => RunExport(args),
+        "info" => RunInfo(args),
         _ => Unknown(),
     };
 }
@@ -126,6 +130,33 @@ static int RunExport(string[] args)
     return 0;
 }
 
+static int RunInfo(string[] args)
+{
+    var (inputPath, _) = ParseOptions(args);
+    if (inputPath is null || !RequireExistingFile(inputPath))
+    {
+        return 1;
+    }
+
+    var fileSize = new FileInfo(inputPath).Length;
+    var info = new PdfDocumentService().GetInfo(inputPath);
+    var textPageCount = info.Pages.Count(p => p.HasText);
+
+    Console.WriteLine($"ファイル: {inputPath}");
+    Console.WriteLine($"ファイルサイズ: {fileSize:N0} bytes");
+    Console.WriteLine($"PDFバージョン: {info.PdfVersion}");
+    Console.WriteLine($"ページ数: {info.PageCount}");
+    Console.WriteLine($"テキストレイヤー: {(info.HasTextLayer ? $"あり（{textPageCount}/{info.PageCount}ページ）" : "なし")}");
+
+    if (info.Pages.Count > 0)
+    {
+        var first = info.Pages[0];
+        Console.WriteLine($"1ページ目のサイズ: {first.WidthPoints} x {first.HeightPoints} pt");
+    }
+
+    return 0;
+}
+
 static (EpubFabricProject Project, List<DocumentPage> Pages) BuildProjectFromPdf(string inputPath, string workDirectory, int dpi)
 {
     var pdfService = new PdfDocumentService();
@@ -228,6 +259,7 @@ static bool RequireExistingFile(string path)
 static void PrintUsage()
 {
     Console.WriteLine("使い方:");
+    Console.WriteLine("  epubfabric info <input.pdf>");
     Console.WriteLine("  epubfabric convert <input.pdf> [--output <output.epub>] [--dpi <dpi>]");
     Console.WriteLine("  epubfabric analyze <input.pdf> --project <book.efproj> [--dpi <dpi>]");
     Console.WriteLine("  epubfabric export <book.efproj> --format epub [--output <output.epub>]");
