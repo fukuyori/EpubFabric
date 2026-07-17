@@ -2,6 +2,7 @@ using System.Text;
 using EpubFabric.Core.Models;
 using EpubFabric.Document;
 using EpubFabric.Epub;
+using EpubFabric.Evaluation;
 using EpubFabric.Imaging;
 using EpubFabric.Layout;
 using EpubFabric.Ocr;
@@ -22,6 +23,7 @@ try
     return args[0] switch
     {
         "convert" => await RunConvert(args),
+        "evaluate" => await RunEvaluate(args),
         "analyze" => await RunAnalyze(args),
         "export" => RunExport(args),
         "info" => RunInfo(args),
@@ -65,6 +67,77 @@ static async Task<int> RunConvert(string[] args)
     new EpubPackageBuilder().Build(project, chapters, blocksById, outputPath);
 
     Console.WriteLine($"EPUBを生成しました: {outputPath}");
+    return 0;
+}
+
+static async Task<int> RunEvaluate(string[] args)
+{
+    var (inputPath, options) = ParseOptions(args);
+    if (inputPath is null || !RequireExistingFile(inputPath))
+    {
+        return 1;
+    }
+
+    var reportDirectory = options.GetValueOrDefault("--report")
+        ?? Path.Combine(
+            Path.GetDirectoryName(Path.GetFullPath(inputPath)) ?? ".",
+            $"{Path.GetFileNameWithoutExtension(inputPath)}-report");
+    var dpi = ParseDpi(options);
+    var ollamaOptions = ParseOllamaOptions(options);
+
+    var workDirectory = Path.Combine(Path.GetTempPath(), $"epubfabric-{Guid.NewGuid():N}");
+    var (project, pages) = await BuildProjectFromPdf(inputPath, workDirectory, dpi, ollamaOptions);
+
+    var blocksById = pages.SelectMany(p => p.Blocks).ToDictionary(b => b.Id);
+    var summary = new LayoutEvaluator().Evaluate(pages);
+
+    Console.WriteLine("評価レポートを生成しています...");
+
+    var overlayRenderer = new BlockOverlayRenderer();
+    var xhtmlGenerator = new EpubXhtmlGenerator();
+    var pagesDirectory = Path.Combine(reportDirectory, "pages");
+    var imagesDirectory = Path.Combine(reportDirectory, "images");
+    Directory.CreateDirectory(pagesDirectory);
+
+    var entries = new List<PageReportEntry>();
+
+    foreach (var page in pages.OrderBy(p => p.PageNumber))
+    {
+        var overlayRelativePath = $"pages/page-{page.PageNumber:0000}.jpg";
+        overlayRenderer.Render(page.OriginalImagePath, page.Blocks, Path.Combine(reportDirectory, overlayRelativePath));
+
+        // EPUB断片は変換時と同じ規則で生成する（除外ブロックを落とし、読み順に並べる）。
+        var blockIds = page.Blocks
+            .Where(b => !b.IsExcluded)
+            .OrderBy(b => b.ReadingOrder)
+            .Select(b => b.Id)
+            .ToList();
+        var fragmentHtml = string.Concat(
+            xhtmlGenerator.GenerateBlockElements(blockIds, blocksById)
+                .Select(e => e.ToString(System.Xml.Linq.SaveOptions.None)));
+        // EPUB内の相対パス（../images/）をレポート内のパスへ読み替える。
+        fragmentHtml = fragmentHtml.Replace("src=\"../images/", "src=\"images/");
+
+        entries.Add(new PageReportEntry(summary.Pages[entries.Count], overlayRelativePath, fragmentHtml));
+    }
+
+    foreach (var imagePath in pages.SelectMany(p => p.Blocks)
+        .Where(b => b.ExtractedImagePath is not null)
+        .Select(b => b.ExtractedImagePath!)
+        .Distinct())
+    {
+        Directory.CreateDirectory(imagesDirectory);
+        File.Copy(imagePath, Path.Combine(imagesDirectory, Path.GetFileName(imagePath)), overwrite: true);
+    }
+
+    new EvaluationReportBuilder().Write(reportDirectory, project.Title, summary, entries);
+
+    Console.WriteLine($"評価レポートを生成しました: {Path.Combine(reportDirectory, "index.html")}");
+    Console.WriteLine($"  解析済ページ       : {summary.PagesWithBlocks}/{summary.PageCount}");
+    Console.WriteLine($"  テキスト網羅率     : {summary.TextCoverage:P1}（欠落 {summary.TextCharsDropped:N0} 字）");
+    Console.WriteLine($"  図版の画像化       : {summary.FigureWithImageCount}/{summary.FigureCount}");
+    Console.WriteLine($"  見出し検出         : {summary.HeadingCount} 件");
+    Console.WriteLine($"  低信頼ブロック混入 : {summary.LowConfidenceIncludedCount} 件");
     return 0;
 }
 
@@ -168,6 +241,7 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
 {
     var pdfService = new PdfDocumentService();
     var layoutAnalyzer = new HeuristicLayoutAnalyzer();
+    var paragraphMerger = new ParagraphMerger();
     var regionDetector = new NonTextRegionDetector();
     var figureExtractor = new FigureImageExtractor();
     var info = pdfService.GetInfo(inputPath);
@@ -218,21 +292,30 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
 
             if (pageInfo.HasText)
             {
-                // テキストレイヤーには行単位の座標がないため、レイアウト解析は適用せず
-                // ページ全体を1つの本文ブロックとして扱う（信頼度1.0）。
-                var text = pdfService.ExtractPageText(inputPath, pageNumber);
-                if (!string.IsNullOrWhiteSpace(text))
+                // 9.3: テキストレイヤーの文字座標から行を再構成し、OCR結果と同じ
+                // レイアウト解析（見出し・段組み・柱・図版検出）を適用する。
+                var textLines = pdfService.ExtractTextLines(inputPath, pageNumber);
+                if (textLines.Count > 0)
                 {
-                    pageBlocks.Add(new PageBlock
+                    pageBlocks = AnalyzeLayout(pageNumber, imagePath, textLines);
+                }
+                else
+                {
+                    // 文字座標を取得できないPDFは、従来どおりページ全体を1つの本文ブロックとして扱う。
+                    var text = pdfService.ExtractPageText(inputPath, pageNumber);
+                    if (!string.IsNullOrWhiteSpace(text))
                     {
-                        Id = $"p{pageNumber:0000}-b0001",
-                        PageNumber = pageNumber,
-                        Bounds = new BoundingBox(0, 0, 1, 1),
-                        Type = BlockType.Body,
-                        OcrText = text,
-                        OcrConfidence = 1.0,
-                        ReadingOrder = 0,
-                    });
+                        pageBlocks.Add(new PageBlock
+                        {
+                            Id = $"p{pageNumber:0000}-b0001",
+                            PageNumber = pageNumber,
+                            Bounds = new BoundingBox(0, 0, 1, 1),
+                            Type = BlockType.Body,
+                            OcrText = text,
+                            OcrConfidence = 1.0,
+                            ReadingOrder = 0,
+                        });
+                    }
                 }
             }
             else if (!ocrUnavailable)
@@ -243,16 +326,7 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
                     await ocrService.InitializeAsync(new OcrModelProvisioner());
 
                     var ocrResult = ocrService.RecognizePage(imagePath);
-                    var textBounds = ocrResult.Lines.Select(l => l.Bounds).ToList();
-                    var regions = regionDetector.DetectRegions(imagePath, textBounds);
-                    pageBlocks = layoutAnalyzer.AnalyzePage(pageNumber, ocrResult.Lines, regions);
-
-                    foreach (var figureBlock in pageBlocks.Where(b => b.Type == BlockType.Figure))
-                    {
-                        var figureImagePath = Path.Combine(workDirectory, $"{figureBlock.Id}.png");
-                        figureExtractor.Extract(imagePath, figureBlock.Bounds, figureImagePath);
-                        figureBlock.ExtractedImagePath = figureImagePath;
-                    }
+                    pageBlocks = AnalyzeLayout(pageNumber, imagePath, ocrResult.Lines);
                 }
                 catch (Exception ex) when (ex is OcrModelDownloadException or InvalidOperationException)
                 {
@@ -316,6 +390,24 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
     {
         ocrService?.Dispose();
     }
+
+    // 行単位の認識結果（OCR・テキスト層共通）へレイアウト解析と段落統合を適用し、
+    // 図ブロックの画像を切り出す。
+    List<PageBlock> AnalyzeLayout(int pageNumber, string imagePath, IReadOnlyList<TextLine> lines)
+    {
+        var textBounds = lines.Select(l => l.Bounds).ToList();
+        var regions = regionDetector.DetectRegions(imagePath, textBounds);
+        var blocks = paragraphMerger.Merge(layoutAnalyzer.AnalyzePage(pageNumber, lines, regions));
+
+        foreach (var figureBlock in blocks.Where(b => b.Type == BlockType.Figure))
+        {
+            var figureImagePath = Path.Combine(workDirectory, $"{figureBlock.Id}.png");
+            figureExtractor.Extract(imagePath, figureBlock.Bounds, figureImagePath);
+            figureBlock.ExtractedImagePath = figureImagePath;
+        }
+
+        return blocks;
+    }
 }
 
 static (string? PositionalArg, Dictionary<string, string> Options) ParseOptions(string[] args)
@@ -366,9 +458,11 @@ static void PrintUsage()
     Console.WriteLine("使い方:");
     Console.WriteLine("  epubfabric info <input.pdf>");
     Console.WriteLine("  epubfabric convert <input.pdf> [--output <output.epub>] [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
+    Console.WriteLine("  epubfabric evaluate <input.pdf> [--report <report-dir>] [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric analyze <input.pdf> --project <book.efproj> [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric export <book.efproj> --format epub [--output <output.epub>]");
     Console.WriteLine();
+    Console.WriteLine("  evaluate はEPUBを生成せず、ページ画像+検出ブロックと生成されるEPUB断片を左右対照したHTMLレポート（index.html）と定量メトリクス（metrics.json）を出力します。");
     Console.WriteLine("  --ollama を指定すると、Ollamaによる意味分類（見出し・本文などの補正）を行います（既定では無効）。");
     Console.WriteLine("  --ollama-model の既定値: gemma4:12b / --ollama-endpoint の既定値: http://localhost:11434");
 }

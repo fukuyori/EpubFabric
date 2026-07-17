@@ -248,7 +248,12 @@ public sealed class HeuristicLayoutAnalyzer
             }
         }
 
-        columns ??= [[.. normalItems]];
+        if (columns is null)
+        {
+            // ガターが見つからない1段組みページでは、幅広の行も同じ段に属する
+            // 通常の行であり、別扱いすると読み順が崩れるため全項目を1つの段にまとめる。
+            return items.Count > 0 ? [items.OrderBy(i => i.Bounds.Y).ToList()] : [];
+        }
 
         foreach (var wideItem in wideItems)
         {

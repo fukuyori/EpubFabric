@@ -12,6 +12,9 @@
 # Locally generated EPUB output (not source)
 /output/
 
+# Local source PDFs used for manual conversion testing
+/sample/
+
 # User-specific files
 *.rsuser
 *.suo

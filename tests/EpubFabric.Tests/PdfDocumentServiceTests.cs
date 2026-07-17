@@ -30,6 +30,26 @@ public class PdfDocumentServiceTests
     }
 
     [Fact]
+    public void ExtractTextLines_ReturnsLinesWithNormalizedBounds()
+    {
+        var service = new PdfDocumentService();
+
+        var lines = service.ExtractTextLines(SamplePdfPath, pageNumber: 1);
+
+        Assert.NotEmpty(lines);
+        Assert.Contains(lines, l => l.Text.Contains("Hello EpubFabric"));
+
+        foreach (var line in lines)
+        {
+            Assert.InRange(line.Bounds.X, 0, 1);
+            Assert.InRange(line.Bounds.Y, 0, 1);
+            Assert.InRange(line.Bounds.X + line.Bounds.Width, 0, 1.001);
+            Assert.InRange(line.Bounds.Y + line.Bounds.Height, 0, 1.001);
+            Assert.Equal(1.0, line.Confidence);
+        }
+    }
+
+    [Fact]
     public void RenderPageToPng_WritesNonEmptyPngFile()
     {
         var service = new PdfDocumentService();

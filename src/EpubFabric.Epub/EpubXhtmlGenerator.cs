@@ -14,18 +14,48 @@ public sealed class EpubXhtmlGenerator
 
     public XDocument GenerateChapter(DocumentChapter chapter, IReadOnlyDictionary<string, PageBlock> blocksById)
     {
-        var body = new XElement(Xhtml + "body", new XElement(Xhtml + "h1", chapter.Title));
+        var chapterTitle = XmlTextSanitizer.Sanitize(chapter.Title);
+        var body = new XElement(Xhtml + "body", new XElement(Xhtml + "h1", chapterTitle));
+
+        foreach (var element in GenerateBlockElements(chapter.BlockIds, blocksById))
+        {
+            body.Add(element);
+        }
+
+        var html = new XElement(
+            Xhtml + "html",
+            new XAttribute(XNamespace.Xmlns + "epub", EpubOps),
+            new XElement(
+                Xhtml + "head",
+                new XElement(Xhtml + "title", chapterTitle),
+                new XElement(
+                    Xhtml + "link",
+                    new XAttribute("rel", "stylesheet"),
+                    new XAttribute("type", "text/css"),
+                    new XAttribute("href", "../styles/book.css"))),
+            body);
+
+        return new XDocument(new XDeclaration("1.0", "UTF-8", null), html);
+    }
+
+    /// <summary>
+    /// ブロックID列をXHTML要素列へ変換する。章の本文生成と、評価レポートの
+    /// ページ単位断片生成の両方から使う共通経路。
+    /// </summary>
+    public List<XElement> GenerateBlockElements(IReadOnlyList<string> blockIds, IReadOnlyDictionary<string, PageBlock> blocksById)
+    {
+        var elements = new List<XElement>();
 
         // 図に関連付けられたキャプションは <figcaption> として図の中に描画するため、
         // 本文側では個別のブロックとして重複描画しないよう除外する。
-        var captionIdsByFigureId = chapter.BlockIds
+        var captionIdsByFigureId = blockIds
             .Select(id => blocksById.GetValueOrDefault(id))
             .Where(b => b is { Type: BlockType.Caption, RelatedBlockId: not null })
             .GroupBy(b => b!.RelatedBlockId!)
             .ToDictionary(g => g.Key, g => g.Select(b => b!.Id).ToList());
         var consumedCaptionIds = captionIdsByFigureId.Values.SelectMany(ids => ids).ToHashSet();
 
-        foreach (var blockId in chapter.BlockIds)
+        foreach (var blockId in blockIds)
         {
             if (consumedCaptionIds.Contains(blockId) || !blocksById.TryGetValue(blockId, out var block))
             {
@@ -37,39 +67,28 @@ public sealed class EpubXhtmlGenerator
                 var captions = captionIdsByFigureId.GetValueOrDefault(block.Id, [])
                     .Select(id => blocksById[id])
                     .ToList();
-                body.Add(CreateFigureElement(block, captions));
+                elements.Add(CreateFigureElement(block, captions));
                 continue;
             }
 
-            var text = block.CorrectedText ?? block.OcrText;
+            var text = XmlTextSanitizer.Sanitize(block.CorrectedText ?? block.OcrText);
             if (string.IsNullOrWhiteSpace(text))
             {
                 continue;
             }
 
-            body.Add(CreateElement(block.Type, text));
+            elements.Add(CreateElement(block.Type, text));
         }
 
-        var html = new XElement(
-            Xhtml + "html",
-            new XAttribute(XNamespace.Xmlns + "epub", EpubOps),
-            new XElement(
-                Xhtml + "head",
-                new XElement(Xhtml + "title", chapter.Title),
-                new XElement(
-                    Xhtml + "link",
-                    new XAttribute("rel", "stylesheet"),
-                    new XAttribute("type", "text/css"),
-                    new XAttribute("href", "../styles/book.css"))),
-            body);
-
-        return new XDocument(new XDeclaration("1.0", "UTF-8", null), html);
+        return elements;
     }
 
     private static XElement CreateFigureElement(PageBlock figureBlock, IReadOnlyList<PageBlock> captions)
     {
         var figure = new XElement(Xhtml + "figure");
-        var altText = captions.Count > 0 ? (captions[0].CorrectedText ?? captions[0].OcrText) : "図";
+        var altText = captions.Count > 0
+            ? XmlTextSanitizer.Sanitize(captions[0].CorrectedText ?? captions[0].OcrText)
+            : "図";
 
         if (figureBlock.ExtractedImagePath is not null)
         {
@@ -82,9 +101,9 @@ public sealed class EpubXhtmlGenerator
 
         // figure要素の子にできるfigcaptionは1つまでのため、複数行にわたるキャプションは
         // 1つにまとめる（各行はOCRの行検出単位であり、文としては連続している）。
-        var captionText = string.Join(
+        var captionText = XmlTextSanitizer.Sanitize(string.Join(
             "",
-            captions.Select(c => c.CorrectedText ?? c.OcrText).Where(t => !string.IsNullOrWhiteSpace(t)));
+            captions.Select(c => c.CorrectedText ?? c.OcrText).Where(t => !string.IsNullOrWhiteSpace(t))));
         if (!string.IsNullOrWhiteSpace(captionText))
         {
             figure.Add(new XElement(Xhtml + "figcaption", captionText));

@@ -5,6 +5,7 @@
     <Project Path="src/EpubFabric.Core/EpubFabric.Core.csproj" />
     <Project Path="src/EpubFabric.Document/EpubFabric.Document.csproj" />
     <Project Path="src/EpubFabric.Epub/EpubFabric.Epub.csproj" />
+    <Project Path="src/EpubFabric.Evaluation/EpubFabric.Evaluation.csproj" />
     <Project Path="src/EpubFabric.Imaging/EpubFabric.Imaging.csproj" />
     <Project Path="src/EpubFabric.Layout/EpubFabric.Layout.csproj" />
     <Project Path="src/EpubFabric.Ocr/EpubFabric.Ocr.csproj" />

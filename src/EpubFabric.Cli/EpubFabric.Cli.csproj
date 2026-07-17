@@ -9,6 +9,7 @@
     <ProjectReference Include="..\EpubFabric.Ollama\EpubFabric.Ollama.csproj" />
     <ProjectReference Include="..\EpubFabric.Document\EpubFabric.Document.csproj" />
     <ProjectReference Include="..\EpubFabric.Epub\EpubFabric.Epub.csproj" />
+    <ProjectReference Include="..\EpubFabric.Evaluation\EpubFabric.Evaluation.csproj" />
     <ProjectReference Include="..\EpubFabric.Persistence\EpubFabric.Persistence.csproj" />
   </ItemGroup>
 

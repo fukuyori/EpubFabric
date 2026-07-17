@@ -126,17 +126,17 @@ public sealed class EpubPackageBuilder
             Opf + "metadata",
             new XAttribute(XNamespace.Xmlns + "dc", Dc),
             new XElement(Dc + "identifier", new XAttribute("id", "pub-id"), $"urn:uuid:{project.Id}"),
-            new XElement(Dc + "title", project.Title),
+            new XElement(Dc + "title", XmlTextSanitizer.Sanitize(project.Title)),
             new XElement(Dc + "language", project.Language));
 
         if (!string.IsNullOrWhiteSpace(project.Author))
         {
-            metadata.Add(new XElement(Dc + "creator", project.Author));
+            metadata.Add(new XElement(Dc + "creator", XmlTextSanitizer.Sanitize(project.Author)));
         }
 
         if (!string.IsNullOrWhiteSpace(project.Publisher))
         {
-            metadata.Add(new XElement(Dc + "publisher", project.Publisher));
+            metadata.Add(new XElement(Dc + "publisher", XmlTextSanitizer.Sanitize(project.Publisher)));
         }
 
         metadata.Add(new XElement(
@@ -158,21 +158,22 @@ public sealed class EpubPackageBuilder
 
     private static XDocument BuildNavXhtml(string title, IReadOnlyList<DocumentChapter> chapters)
     {
+        var safeTitle = XmlTextSanitizer.Sanitize(title);
         var listItems = chapters.Select((chapter, i) => new XElement(
             Xhtml + "li",
-            new XElement(Xhtml + "a", new XAttribute("href", $"text/{ChapterFileName(i)}"), chapter.Title)));
+            new XElement(Xhtml + "a", new XAttribute("href", $"text/{ChapterFileName(i)}"), XmlTextSanitizer.Sanitize(chapter.Title))));
 
         var nav = new XElement(
             Xhtml + "nav",
             new XAttribute(EpubOps + "type", "toc"),
             new XAttribute("id", "toc"),
-            new XElement(Xhtml + "h1", title),
+            new XElement(Xhtml + "h1", safeTitle),
             new XElement(Xhtml + "ol", listItems));
 
         var html = new XElement(
             Xhtml + "html",
             new XAttribute(XNamespace.Xmlns + "epub", EpubOps),
-            new XElement(Xhtml + "head", new XElement(Xhtml + "title", title)),
+            new XElement(Xhtml + "head", new XElement(Xhtml + "title", safeTitle)),
             new XElement(Xhtml + "body", nav));
 
         return new XDocument(new XDeclaration("1.0", "UTF-8", null), html);
