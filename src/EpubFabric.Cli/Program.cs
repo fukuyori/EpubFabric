@@ -2,61 +2,131 @@ using EpubFabric.Core.Models;
 using EpubFabric.Document;
 using EpubFabric.Epub;
 using EpubFabric.Pdf;
+using EpubFabric.Persistence;
 
-if (args.Length == 0 || args[0] != "convert")
+if (args.Length == 0)
 {
     PrintUsage();
     return 1;
 }
-
-string? inputPath = null;
-string? outputPath = null;
-var dpi = 300;
-
-for (var i = 1; i < args.Length; i++)
-{
-    switch (args[i])
-    {
-        case "--output":
-            outputPath = args[++i];
-            break;
-        case "--dpi":
-            dpi = int.Parse(args[++i]);
-            break;
-        default:
-            inputPath ??= args[i];
-            break;
-    }
-}
-
-if (inputPath is null)
-{
-    Console.Error.WriteLine("エラー: 入力PDFを指定してください。");
-    PrintUsage();
-    return 1;
-}
-
-if (!File.Exists(inputPath))
-{
-    Console.Error.WriteLine($"エラー: ファイルが見つかりません: {inputPath}");
-    return 1;
-}
-
-outputPath ??= Path.ChangeExtension(inputPath, ".epub");
 
 try
 {
-    ConvertPdfToEpub(inputPath, outputPath, dpi);
-    Console.WriteLine($"EPUBを生成しました: {outputPath}");
-    return 0;
+    return args[0] switch
+    {
+        "convert" => RunConvert(args),
+        "analyze" => RunAnalyze(args),
+        "export" => RunExport(args),
+        _ => Unknown(),
+    };
 }
 catch (PdfLoadException ex)
 {
     Console.Error.WriteLine($"エラー: {ex.Message}");
     return 1;
 }
+catch (FileNotFoundException ex)
+{
+    Console.Error.WriteLine($"エラー: {ex.Message}");
+    return 1;
+}
 
-static void ConvertPdfToEpub(string inputPath, string outputPath, int dpi)
+static int Unknown()
+{
+    PrintUsage();
+    return 1;
+}
+
+static int RunConvert(string[] args)
+{
+    var (inputPath, options) = ParseOptions(args);
+    if (inputPath is null || !RequireExistingFile(inputPath))
+    {
+        return 1;
+    }
+
+    var outputPath = options.GetValueOrDefault("--output") ?? Path.ChangeExtension(inputPath, ".epub");
+    var dpi = ParseDpi(options);
+
+    var workDirectory = Path.Combine(Path.GetTempPath(), $"epubfabric-{Guid.NewGuid():N}");
+    var (project, pages) = BuildProjectFromPdf(inputPath, workDirectory, dpi);
+
+    var chapters = new DocumentBuilder().BuildChapters(pages, project.Title);
+    var blocksById = pages.SelectMany(p => p.Blocks).ToDictionary(b => b.Id);
+    new EpubPackageBuilder().Build(project, chapters, blocksById, outputPath);
+
+    Console.WriteLine($"EPUBを生成しました: {outputPath}");
+    return 0;
+}
+
+static int RunAnalyze(string[] args)
+{
+    var (inputPath, options) = ParseOptions(args);
+    if (inputPath is null || !RequireExistingFile(inputPath))
+    {
+        return 1;
+    }
+
+    if (!options.TryGetValue("--project", out var projectDirectory))
+    {
+        Console.Error.WriteLine("エラー: --project <book.efproj> を指定してください。");
+        return 1;
+    }
+
+    var dpi = ParseDpi(options);
+    var workDirectory = Path.Combine(Path.GetTempPath(), $"epubfabric-{Guid.NewGuid():N}");
+    var (project, _) = BuildProjectFromPdf(inputPath, workDirectory, dpi);
+
+    new EfprojStore().Save(project, projectDirectory);
+
+    Console.WriteLine($"プロジェクトを保存しました: {projectDirectory}");
+    Console.WriteLine($"blocks/text 内のテキストファイルを編集して校正できます。校正後は次を実行してください:");
+    Console.WriteLine($"  epubfabric export {projectDirectory} --format epub");
+    return 0;
+}
+
+static int RunExport(string[] args)
+{
+    var (projectDirectory, options) = ParseOptions(args);
+    if (projectDirectory is null)
+    {
+        Console.Error.WriteLine("エラー: プロジェクト（.efproj）を指定してください。");
+        return 1;
+    }
+
+    if (!Directory.Exists(projectDirectory))
+    {
+        Console.Error.WriteLine($"エラー: プロジェクトフォルダーが見つかりません: {projectDirectory}");
+        return 1;
+    }
+
+    var format = options.GetValueOrDefault("--format", "epub");
+    if (format != "epub")
+    {
+        Console.Error.WriteLine($"エラー: 現時点では --format epub のみ対応しています（指定値: {format}）。");
+        return 1;
+    }
+
+    var outputPath = options.GetValueOrDefault("--output")
+        ?? Path.ChangeExtension(projectDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), ".epub");
+
+    var project = new EfprojStore().Load(projectDirectory);
+    var chapters = new DocumentBuilder().BuildChapters(project.Pages, project.Title);
+    var blocksById = project.Pages.SelectMany(p => p.Blocks).ToDictionary(b => b.Id);
+
+    var correctedCount = blocksById.Values.Count(b => b.IsManuallyEdited);
+    if (correctedCount > 0)
+    {
+        Console.WriteLine($"{correctedCount} 件の校正済みブロックを反映します。");
+    }
+
+    new EpubPackageBuilder().Build(project, chapters, blocksById, outputPath);
+
+    Console.WriteLine($"EPUBを生成しました: {outputPath}");
+    return 0;
+}
+
+static (EpubFabricProject Project, List<DocumentPage> Pages) BuildProjectFromPdf(string inputPath, string workDirectory, int dpi)
 {
     var pdfService = new PdfDocumentService();
     var info = pdfService.GetInfo(inputPath);
@@ -64,10 +134,9 @@ static void ConvertPdfToEpub(string inputPath, string outputPath, int dpi)
     if (!info.HasTextLayer)
     {
         // 第1段階はテキストレイヤー抽出のみ対応。スキャン画像のみのPDFはOCR実装後に対応する。
-        Console.WriteLine("警告: テキストレイヤーが見つかりません。第1段階ではOCR未対応のため、本文が空のEPUBになります。");
+        Console.WriteLine("警告: テキストレイヤーが見つかりません。第1段階ではOCR未対応のため、本文が空になります。");
     }
 
-    var workDirectory = Path.Combine(Path.GetTempPath(), $"epubfabric-{Guid.NewGuid():N}");
     Directory.CreateDirectory(workDirectory);
 
     var pages = new List<DocumentPage>();
@@ -111,24 +180,55 @@ static void ConvertPdfToEpub(string inputPath, string outputPath, int dpi)
         pages.Add(page);
     }
 
-    var title = Path.GetFileNameWithoutExtension(inputPath);
-    var chapters = new DocumentBuilder().BuildChapters(pages, title);
-
     var project = new EpubFabricProject
     {
         Id = Guid.NewGuid(),
-        Title = title,
+        Title = Path.GetFileNameWithoutExtension(inputPath),
         SourcePdfPath = inputPath,
         Pages = pages,
-        Chapters = [.. chapters],
     };
 
-    var blocksById = pages.SelectMany(p => p.Blocks).ToDictionary(b => b.Id);
+    return (project, pages);
+}
 
-    new EpubPackageBuilder().Build(project, chapters, blocksById, outputPath);
+static (string? PositionalArg, Dictionary<string, string> Options) ParseOptions(string[] args)
+{
+    string? positional = null;
+    var options = new Dictionary<string, string>();
+
+    for (var i = 1; i < args.Length; i++)
+    {
+        if (args[i].StartsWith("--", StringComparison.Ordinal))
+        {
+            options[args[i]] = i + 1 < args.Length ? args[++i] : string.Empty;
+        }
+        else
+        {
+            positional ??= args[i];
+        }
+    }
+
+    return (positional, options);
+}
+
+static int ParseDpi(Dictionary<string, string> options) =>
+    options.TryGetValue("--dpi", out var value) ? int.Parse(value) : 300;
+
+static bool RequireExistingFile(string path)
+{
+    if (File.Exists(path))
+    {
+        return true;
+    }
+
+    Console.Error.WriteLine($"エラー: ファイルが見つかりません: {path}");
+    return false;
 }
 
 static void PrintUsage()
 {
-    Console.WriteLine("使い方: epubfabric convert <input.pdf> [--output <output.epub>] [--dpi <dpi>]");
+    Console.WriteLine("使い方:");
+    Console.WriteLine("  epubfabric convert <input.pdf> [--output <output.epub>] [--dpi <dpi>]");
+    Console.WriteLine("  epubfabric analyze <input.pdf> --project <book.efproj> [--dpi <dpi>]");
+    Console.WriteLine("  epubfabric export <book.efproj> --format epub [--output <output.epub>]");
 }
