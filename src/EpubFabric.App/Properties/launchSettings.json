@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "EpubFabric.App (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "EpubFabric.App (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
