@@ -9,6 +9,9 @@
 # Claude Code harness state (not project content)
 .claude/
 
+# Locally generated EPUB output (not source)
+/output/
+
 # User-specific files
 *.rsuser
 *.suo
