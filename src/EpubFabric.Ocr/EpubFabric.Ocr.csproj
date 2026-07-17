@@ -6,7 +6,19 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.27.1" />
+    <PackageReference Include="RapidOcrNet" Version="3.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      RapidOcrNetのNuGetパッケージはこの分類モデルをMSBuildターゲットで
+      ビルド出力へコピーするが、そのターゲットは直接参照しているプロジェクト
+      （このOcrプロジェクト自身）にしか適用されず、ProjectReference経由の
+      呼び出し元（Cli/App/Tests）までは伝播しない。ProjectReferenceの伝播に
+      依存せずどの呼び出し元からでも解決できるよう、実行時に埋め込みリソース
+      として展開する。
+    -->
+    <EmbeddedResource Include="Models\ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx" />
   </ItemGroup>
 
   <PropertyGroup>

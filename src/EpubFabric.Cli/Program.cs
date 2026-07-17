@@ -2,6 +2,7 @@ using System.Text;
 using EpubFabric.Core.Models;
 using EpubFabric.Document;
 using EpubFabric.Epub;
+using EpubFabric.Ocr;
 using EpubFabric.Pdf;
 using EpubFabric.Persistence;
 
@@ -17,8 +18,8 @@ try
 {
     return args[0] switch
     {
-        "convert" => RunConvert(args),
-        "analyze" => RunAnalyze(args),
+        "convert" => await RunConvert(args),
+        "analyze" => await RunAnalyze(args),
         "export" => RunExport(args),
         "info" => RunInfo(args),
         _ => Unknown(),
@@ -41,7 +42,7 @@ static int Unknown()
     return 1;
 }
 
-static int RunConvert(string[] args)
+static async Task<int> RunConvert(string[] args)
 {
     var (inputPath, options) = ParseOptions(args);
     if (inputPath is null || !RequireExistingFile(inputPath))
@@ -53,7 +54,7 @@ static int RunConvert(string[] args)
     var dpi = ParseDpi(options);
 
     var workDirectory = Path.Combine(Path.GetTempPath(), $"epubfabric-{Guid.NewGuid():N}");
-    var (project, pages) = BuildProjectFromPdf(inputPath, workDirectory, dpi);
+    var (project, pages) = await BuildProjectFromPdf(inputPath, workDirectory, dpi);
 
     var chapters = new DocumentBuilder().BuildChapters(pages, project.Title);
     var blocksById = pages.SelectMany(p => p.Blocks).ToDictionary(b => b.Id);
@@ -63,7 +64,7 @@ static int RunConvert(string[] args)
     return 0;
 }
 
-static int RunAnalyze(string[] args)
+static async Task<int> RunAnalyze(string[] args)
 {
     var (inputPath, options) = ParseOptions(args);
     if (inputPath is null || !RequireExistingFile(inputPath))
@@ -79,7 +80,7 @@ static int RunAnalyze(string[] args)
 
     var dpi = ParseDpi(options);
     var workDirectory = Path.Combine(Path.GetTempPath(), $"epubfabric-{Guid.NewGuid():N}");
-    var (project, _) = BuildProjectFromPdf(inputPath, workDirectory, dpi);
+    var (project, _) = await BuildProjectFromPdf(inputPath, workDirectory, dpi);
 
     new EfprojStore().Save(project, projectDirectory);
 
@@ -157,69 +158,121 @@ static int RunInfo(string[] args)
     return 0;
 }
 
-static (EpubFabricProject Project, List<DocumentPage> Pages) BuildProjectFromPdf(string inputPath, string workDirectory, int dpi)
+static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildProjectFromPdf(string inputPath, string workDirectory, int dpi)
 {
+    // 14章の既定しきい値（OCR信頼度0.85未満は要確認）。
+    const double ReviewConfidenceThreshold = 0.85;
+
     var pdfService = new PdfDocumentService();
     var info = pdfService.GetInfo(inputPath);
 
-    if (!info.HasTextLayer)
+    var pagesNeedingOcr = info.Pages.Count(p => !p.HasText);
+    if (pagesNeedingOcr > 0)
     {
-        // 第1段階はテキストレイヤー抽出のみ対応。スキャン画像のみのPDFはOCR実装後に対応する。
-        Console.WriteLine("警告: テキストレイヤーが見つかりません。第1段階ではOCR未対応のため、本文が空になります。");
+        Console.WriteLine($"{pagesNeedingOcr}/{info.PageCount} ページにテキストレイヤーがありません。OCR（PP-OCRv6多言語モデル）で認識します。");
     }
 
     Directory.CreateDirectory(workDirectory);
 
-    var pages = new List<DocumentPage>();
+    PageOcrService? ocrService = null;
+    var ocrUnavailable = false;
 
-    for (var i = 0; i < info.PageCount; i++)
+    try
     {
-        var pageNumber = i + 1;
-        Console.WriteLine($"ページ {pageNumber}/{info.PageCount} を処理しています...");
+        var pages = new List<DocumentPage>();
+        var reviewRequiredCount = 0;
 
-        var imagePath = Path.Combine(workDirectory, $"page-original-{pageNumber:0000}.png");
-        pdfService.RenderPageToPng(inputPath, pageNumber, imagePath, dpi);
-
-        var text = pdfService.ExtractPageText(inputPath, pageNumber);
-        var pageInfo = info.Pages[i];
-
-        var page = new DocumentPage
+        for (var i = 0; i < info.PageCount; i++)
         {
-            PageNumber = pageNumber,
-            OriginalImagePath = imagePath,
-            ProcessedImagePath = imagePath,
-            PreviewImagePath = imagePath,
-            Width = pageInfo.WidthPoints,
-            Height = pageInfo.HeightPoints,
-            WritingMode = WritingMode.Horizontal,
-            Status = PageProcessingStatus.OcrCompleted,
-        };
+            var pageNumber = i + 1;
+            Console.WriteLine($"ページ {pageNumber}/{info.PageCount} を処理しています...");
 
-        if (!string.IsNullOrWhiteSpace(text))
-        {
-            page.Blocks.Add(new PageBlock
+            var imagePath = Path.Combine(workDirectory, $"page-original-{pageNumber:0000}.png");
+            pdfService.RenderPageToPng(inputPath, pageNumber, imagePath, dpi);
+
+            var pageInfo = info.Pages[i];
+            string? text = null;
+            var confidence = 1.0; // テキストレイヤーからの直接抽出は信頼度1.0として扱う。
+
+            if (pageInfo.HasText)
             {
-                Id = $"p{pageNumber:0000}-b0001",
+                text = pdfService.ExtractPageText(inputPath, pageNumber);
+            }
+            else if (!ocrUnavailable)
+            {
+                try
+                {
+                    ocrService ??= new PageOcrService();
+                    await ocrService.InitializeAsync(new OcrModelProvisioner());
+
+                    var ocrResult = ocrService.RecognizePage(imagePath);
+                    text = ocrResult.Text;
+                    confidence = ocrResult.AverageConfidence;
+                }
+                catch (Exception ex) when (ex is OcrModelDownloadException or InvalidOperationException)
+                {
+                    // 16章「OCRモデルがない」: OCRなしで処理を継続する。
+                    Console.WriteLine($"警告: OCRを利用できません（{ex.Message}）。以降もテキストなしで処理を続けます。");
+                    ocrUnavailable = true;
+                }
+            }
+
+            var requiresReview = text is not null && confidence < ReviewConfidenceThreshold;
+
+            var page = new DocumentPage
+            {
                 PageNumber = pageNumber,
-                Bounds = new BoundingBox(0, 0, 1, 1),
-                Type = BlockType.Body,
-                OcrText = text,
-                ReadingOrder = 0,
-            });
+                OriginalImagePath = imagePath,
+                ProcessedImagePath = imagePath,
+                PreviewImagePath = imagePath,
+                Width = pageInfo.WidthPoints,
+                Height = pageInfo.HeightPoints,
+                WritingMode = WritingMode.Horizontal,
+                Status = text is not null ? PageProcessingStatus.OcrCompleted : PageProcessingStatus.Error,
+            };
+
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                if (requiresReview)
+                {
+                    reviewRequiredCount++;
+                }
+
+                page.Blocks.Add(new PageBlock
+                {
+                    Id = $"p{pageNumber:0000}-b0001",
+                    PageNumber = pageNumber,
+                    Bounds = new BoundingBox(0, 0, 1, 1),
+                    Type = BlockType.Body,
+                    OcrText = text,
+                    OcrConfidence = confidence,
+                    ReadingOrder = 0,
+                    RequiresReview = requiresReview,
+                });
+            }
+
+            pages.Add(page);
         }
 
-        pages.Add(page);
+        if (reviewRequiredCount > 0)
+        {
+            Console.WriteLine($"{reviewRequiredCount} ページがOCR信頼度{ReviewConfidenceThreshold:0.00}未満のため要確認です。");
+        }
+
+        var project = new EpubFabricProject
+        {
+            Id = Guid.NewGuid(),
+            Title = Path.GetFileNameWithoutExtension(inputPath),
+            SourcePdfPath = inputPath,
+            Pages = pages,
+        };
+
+        return (project, pages);
     }
-
-    var project = new EpubFabricProject
+    finally
     {
-        Id = Guid.NewGuid(),
-        Title = Path.GetFileNameWithoutExtension(inputPath),
-        SourcePdfPath = inputPath,
-        Pages = pages,
-    };
-
-    return (project, pages);
+        ocrService?.Dispose();
+    }
 }
 
 static (string? PositionalArg, Dictionary<string, string> Options) ParseOptions(string[] args)

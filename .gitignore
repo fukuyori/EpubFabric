@@ -6,6 +6,9 @@
 # dotenv files
 .env
 
+# Claude Code harness state (not project content)
+.claude/
+
 # User-specific files
 *.rsuser
 *.suo
