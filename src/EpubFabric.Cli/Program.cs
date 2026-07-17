@@ -311,6 +311,7 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
     var info = pdfService.GetInfo(inputPath);
 
     PageBlockClassifier? classifier = null;
+    OcrTextCorrector? corrector = null;
 
     if (ollamaOptions is { Enabled: true })
     {
@@ -318,7 +319,8 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
         if (await client.IsAvailableAsync())
         {
             classifier = new PageBlockClassifier(client, ollamaOptions.Model);
-            Console.WriteLine($"Ollama({ollamaOptions.Model})による意味分類を行います。");
+            corrector = new OcrTextCorrector(client, ollamaOptions.Model);
+            Console.WriteLine($"Ollama({ollamaOptions.Model})による意味分類とOCR校正を行います。");
         }
         else
         {
@@ -479,6 +481,23 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
                 {
                     // 16章「Ollama応答不正」: 規則ベースの結果をそのまま使用し、処理を継続する。
                     Console.WriteLine($"警告: Ollamaによる分類に失敗しました（{ex.Message}）。規則ベースの分類のまま続けます。");
+                }
+            }
+
+            if (corrector is not null && pageBlocks.Count > 0)
+            {
+                try
+                {
+                    var correctedCount = await corrector.CorrectPageAsync(page);
+                    if (correctedCount > 0)
+                    {
+                        Console.WriteLine($"  Ollamaにより{correctedCount}件のOCR文字列を校正しました。");
+                    }
+                }
+                catch (OllamaClassificationException ex)
+                {
+                    // OCR校正は補助機能であり、失敗してもOCR結果のまま処理を継続する。
+                    Console.WriteLine($"警告: OllamaによるOCR校正に失敗しました（{ex.Message}）。OCR結果のまま続けます。");
                 }
             }
 
