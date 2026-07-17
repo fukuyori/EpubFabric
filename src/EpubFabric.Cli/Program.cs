@@ -307,6 +307,7 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
     var textLayerBlockBuilder = new TextLayerBlockBuilder();
     var regionDetector = new NonTextRegionDetector();
     var figureExtractor = new FigureImageExtractor();
+    var ocrPreprocessor = new OcrImagePreprocessor();
     var info = pdfService.GetInfo(inputPath);
 
     PageBlockClassifier? classifier = null;
@@ -376,6 +377,8 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
                 }
             }
 
+            var processedImagePath = imagePath;
+
             if (requiresOcr && !ocrUnavailable)
             {
                 try
@@ -383,8 +386,42 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
                     ocrService ??= new PageOcrService();
                     await ocrService.InitializeAsync(new OcrModelProvisioner());
 
-                    var ocrResult = ocrService.RecognizePage(imagePath);
-                    pageBlocks = BuildTextBlocks(pageNumber, imagePath, ocrResult.Lines);
+                    // 9.3 前処理: 傾きを補正した画像でOCRし、座標は元画像の座標系へ戻す。
+                    // 表示・EPUB出力には元画像をそのまま使う（原型保証）。
+                    OcrPreprocessResult? preprocess = null;
+                    try
+                    {
+                        preprocess = ocrPreprocessor.Preprocess(
+                            imagePath,
+                            Path.Combine(workDirectory, $"page-processed-{pageNumber:0000}.png"));
+                        if (preprocess.DeskewApplied)
+                        {
+                            processedImagePath = preprocess.ImagePathForOcr;
+                            Console.WriteLine($"  傾き{preprocess.SkewAngleDegrees:+0.0;-0.0}°を補正した画像でOCRします。");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // 前処理は精度向上のための補助であり、失敗しても元画像でOCRを続行する。
+                        Console.WriteLine($"警告: OCR前処理に失敗しました（{ex.Message}）。元画像でOCRします。");
+                    }
+
+                    var ocrResult = ocrService.RecognizePage(processedImagePath);
+                    var ocrLines = ocrResult.Lines;
+
+                    if (preprocess is { DeskewApplied: true })
+                    {
+                        ocrLines = ocrLines
+                            .Select(line => line with { Bounds = preprocess.MapToOriginal(line.Bounds) })
+                            .ToList();
+                    }
+
+                    if (ocrResult.DroppedLineCount > 0)
+                    {
+                        Console.WriteLine($"  低信頼のOCRゴミ行{ocrResult.DroppedLineCount}件を除外しました。");
+                    }
+
+                    pageBlocks = BuildTextBlocks(pageNumber, imagePath, ocrLines);
                 }
                 catch (Exception ex) when (ex is OcrModelDownloadException or InvalidOperationException)
                 {
@@ -419,7 +456,7 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
             {
                 PageNumber = pageNumber,
                 OriginalImagePath = imagePath,
-                ProcessedImagePath = imagePath,
+                ProcessedImagePath = processedImagePath,
                 PreviewImagePath = imagePath,
                 Width = pageInfo.WidthPoints,
                 Height = pageInfo.HeightPoints,
