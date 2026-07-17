@@ -64,7 +64,12 @@ static async Task<int> RunConvert(string[] args)
     }
 
     var workDirectory = Path.Combine(Path.GetTempPath(), $"epubfabric-{Guid.NewGuid():N}");
-    var (project, _) = await BuildProjectFromPdf(inputPath, workDirectory, dpi, ollamaOptions);
+    var (project, _) = await BuildProjectFromPdf(
+        inputPath,
+        workDirectory,
+        dpi,
+        ollamaOptions,
+        preserveAllTextLines: layout == OutputLayout.Fixed);
 
     BuildEpub(project, layout, outputPath);
 
@@ -88,7 +93,12 @@ static async Task<int> RunEvaluate(string[] args)
     var ollamaOptions = ParseOllamaOptions(options);
 
     var workDirectory = Path.Combine(Path.GetTempPath(), $"epubfabric-{Guid.NewGuid():N}");
-    var (project, pages) = await BuildProjectFromPdf(inputPath, workDirectory, dpi, ollamaOptions);
+    var (project, pages) = await BuildProjectFromPdf(
+        inputPath,
+        workDirectory,
+        dpi,
+        ollamaOptions,
+        preserveAllTextLines: false);
 
     var blocksById = pages.SelectMany(p => p.Blocks).ToDictionary(b => b.Id);
     var summary = new LayoutEvaluator().Evaluate(pages);
@@ -160,7 +170,12 @@ static async Task<int> RunAnalyze(string[] args)
     var dpi = ParseDpi(options);
     var ollamaOptions = ParseOllamaOptions(options);
     var workDirectory = Path.Combine(Path.GetTempPath(), $"epubfabric-{Guid.NewGuid():N}");
-    var (project, _) = await BuildProjectFromPdf(inputPath, workDirectory, dpi, ollamaOptions);
+    var (project, _) = await BuildProjectFromPdf(
+        inputPath,
+        workDirectory,
+        dpi,
+        ollamaOptions,
+        preserveAllTextLines: true);
 
     new EfprojStore().Save(project, projectDirectory);
 
@@ -279,11 +294,17 @@ static int RunInfo(string[] args)
 }
 
 static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildProjectFromPdf(
-    string inputPath, string workDirectory, int dpi, OllamaOptions? ollamaOptions = null)
+    string inputPath,
+    string workDirectory,
+    int dpi,
+    OllamaOptions? ollamaOptions = null,
+    bool preserveAllTextLines = true)
 {
     var pdfService = new PdfDocumentService();
+    var textLayerEvaluator = new PdfTextLayerQualityEvaluator();
     var layoutAnalyzer = new HeuristicLayoutAnalyzer();
     var paragraphMerger = new ParagraphMerger();
+    var textLayerBlockBuilder = new TextLayerBlockBuilder();
     var regionDetector = new NonTextRegionDetector();
     var figureExtractor = new FigureImageExtractor();
     var info = pdfService.GetInfo(inputPath);
@@ -308,7 +329,10 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
     var pagesNeedingOcr = info.Pages.Count(p => !p.HasText);
     if (pagesNeedingOcr > 0)
     {
-        Console.WriteLine($"{pagesNeedingOcr}/{info.PageCount} ページにテキストレイヤーがありません。OCR（PP-OCRv6多言語モデル）で認識し、行座標から見出し・段組みを推定します。");
+        var ocrPurpose = preserveAllTextLines
+            ? "認識文字と行座標を透明テキスト層に使用します。"
+            : "認識文字と行座標から見出し・段組みを推定します。";
+        Console.WriteLine($"{pagesNeedingOcr}/{info.PageCount} ページにテキストレイヤーがありません。OCR（PP-OCRv6多言語モデル）で{ocrPurpose}");
     }
 
     Directory.CreateDirectory(workDirectory);
@@ -331,36 +355,28 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
 
             var pageInfo = info.Pages[i];
             var pageBlocks = new List<PageBlock>();
+            string? fallbackPdfText = null;
+            var requiresOcr = !pageInfo.HasText;
 
             if (pageInfo.HasText)
             {
-                // 9.3: テキストレイヤーの文字座標から行を再構成し、OCR結果と同じ
-                // レイアウト解析（見出し・段組み・柱・図版検出）を適用する。
+                var rawText = pdfService.ExtractPageText(inputPath, pageNumber);
                 var textLines = pdfService.ExtractTextLines(inputPath, pageNumber);
-                if (textLines.Count > 0)
+                var assessment = textLayerEvaluator.Assess(rawText, textLines);
+
+                if (assessment.IsUsable)
                 {
-                    pageBlocks = AnalyzeLayout(pageNumber, imagePath, textLines);
+                    pageBlocks = BuildTextBlocks(pageNumber, imagePath, textLines);
                 }
                 else
                 {
-                    // 文字座標を取得できないPDFは、従来どおりページ全体を1つの本文ブロックとして扱う。
-                    var text = pdfService.ExtractPageText(inputPath, pageNumber);
-                    if (!string.IsNullOrWhiteSpace(text))
-                    {
-                        pageBlocks.Add(new PageBlock
-                        {
-                            Id = $"p{pageNumber:0000}-b0001",
-                            PageNumber = pageNumber,
-                            Bounds = new BoundingBox(0, 0, 1, 1),
-                            Type = BlockType.Body,
-                            OcrText = text,
-                            OcrConfidence = 1.0,
-                            ReadingOrder = 0,
-                        });
-                    }
+                    requiresOcr = true;
+                    fallbackPdfText = rawText;
+                    Console.WriteLine($"  PDF文字レイヤーを使用しません: {assessment.Reason} OCRへ切り替えます。");
                 }
             }
-            else if (!ocrUnavailable)
+
+            if (requiresOcr && !ocrUnavailable)
             {
                 try
                 {
@@ -368,14 +384,33 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
                     await ocrService.InitializeAsync(new OcrModelProvisioner());
 
                     var ocrResult = ocrService.RecognizePage(imagePath);
-                    pageBlocks = AnalyzeLayout(pageNumber, imagePath, ocrResult.Lines);
+                    pageBlocks = BuildTextBlocks(pageNumber, imagePath, ocrResult.Lines);
                 }
                 catch (Exception ex) when (ex is OcrModelDownloadException or InvalidOperationException)
                 {
                     // 16章「OCRモデルがない」: OCRなしで処理を継続する。
-                    Console.WriteLine($"警告: OCRを利用できません（{ex.Message}）。以降もテキストなしで処理を続けます。");
+                    Console.WriteLine($"警告: OCRを利用できません（{ex.Message}）。");
                     ocrUnavailable = true;
                 }
+            }
+
+            // 座標付きPDF文字が使えず、OCRも利用できない場合だけ、検索可能性を完全に
+            // 失わないために座標なしのPDF文字を要確認ブロックとして残す。
+            if (pageBlocks.Count == 0 && !string.IsNullOrWhiteSpace(fallbackPdfText))
+            {
+                pageBlocks.Add(new PageBlock
+                {
+                    Id = $"p{pageNumber:0000}-b0001",
+                    PageNumber = pageNumber,
+                    Bounds = new BoundingBox(0, 0, 1, 1),
+                    Type = BlockType.Body,
+                    OcrText = fallbackPdfText,
+                    OcrConfidence = 0.5,
+                    TextSource = TextSourceKind.PdfTextLayer,
+                    ReadingOrder = 0,
+                    RequiresReview = true,
+                });
+                Console.WriteLine("  警告: OCR結果がないため、座標なしのPDF文字を要確認として使用します。");
             }
 
             reviewRequiredCount += pageBlocks.Count(b => b.RequiresReview);
@@ -418,6 +453,11 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
             Console.WriteLine($"{reviewRequiredCount} 件のブロックがOCR信頼度0.85未満のため要確認です。");
         }
 
+        var pdfTextPageCount = pages.Count(page => page.Blocks.Any(block => block.TextSource == TextSourceKind.PdfTextLayer));
+        var ocrTextPageCount = pages.Count(page => page.Blocks.Any(block => block.TextSource == TextSourceKind.Ocr));
+        var noTextPageCount = pages.Count(page => page.Blocks.All(block => block.TextSource == TextSourceKind.Unknown));
+        Console.WriteLine($"文字情報の取得元: PDF {pdfTextPageCount}ページ / OCR {ocrTextPageCount}ページ / 文字なし {noTextPageCount}ページ");
+
         var project = new EpubFabricProject
         {
             Id = Guid.NewGuid(),
@@ -433,8 +473,13 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
         ocrService?.Dispose();
     }
 
-    // 行単位の認識結果（OCR・テキスト層共通）へレイアウト解析と段落統合を適用し、
-    // 図ブロックの画像を切り出す。
+    // 固定レイアウトでは全テキスト行を座標付きのまま保持する。
+    // リフロー型ではレイアウト解析と段落統合を適用し、図ブロックの画像を切り出す。
+    List<PageBlock> BuildTextBlocks(int pageNumber, string imagePath, IReadOnlyList<TextLine> lines) =>
+        preserveAllTextLines
+            ? textLayerBlockBuilder.Build(pageNumber, lines)
+            : AnalyzeLayout(pageNumber, imagePath, lines);
+
     List<PageBlock> AnalyzeLayout(int pageNumber, string imagePath, IReadOnlyList<TextLine> lines)
     {
         var textBounds = lines.Select(l => l.Bounds).ToList();

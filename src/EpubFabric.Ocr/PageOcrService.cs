@@ -1,5 +1,6 @@
 using RapidOcrNet;
 using SkiaSharp;
+using EpubFabric.Core.Models;
 using CoreTextLine = EpubFabric.Core.Models.TextLine;
 
 namespace EpubFabric.Ocr;
@@ -75,7 +76,7 @@ public sealed class PageOcrService : IDisposable
 
         var confidence = block.CharScores is { Length: > 0 } ? block.CharScores.Average() : 0.0;
 
-        return new CoreTextLine(bounds, block.Text, confidence);
+        return new CoreTextLine(bounds, block.Text, confidence, TextSourceKind.Ocr);
     }
 
     public void Dispose() => _ocr.Dispose();

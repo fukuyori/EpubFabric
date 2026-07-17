@@ -94,6 +94,7 @@ public sealed class FixedLayoutXhtmlGenerator
             Xhtml + "span",
             new XAttribute("id", block.Id),
             new XAttribute("class", $"positioned-text block-{block.Type.ToString().ToLowerInvariant()}"),
+            new XAttribute("data-text-source", TextSourceName(block.TextSource)),
             new XAttribute("style", style),
             text);
     }
@@ -101,4 +102,11 @@ public sealed class FixedLayoutXhtmlGenerator
     private static double ClampRatio(double value) => Math.Clamp(value, 0, 1);
 
     private static string Number(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+
+    private static string TextSourceName(TextSourceKind source) => source switch
+    {
+        TextSourceKind.PdfTextLayer => "pdf",
+        TextSourceKind.Ocr => "ocr",
+        _ => "unknown",
+    };
 }

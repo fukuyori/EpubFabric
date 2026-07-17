@@ -55,7 +55,9 @@ public sealed class ParagraphMerger
 
     private static bool CanMerge(PageBlock paragraph, PageBlock lastLine, PageBlock next)
     {
-        if (lastLine.Type != next.Type || next.Type is not (BlockType.Body or BlockType.Aside))
+        if (lastLine.Type != next.Type
+            || lastLine.TextSource != next.TextSource
+            || next.Type is not (BlockType.Body or BlockType.Aside))
         {
             return false;
         }

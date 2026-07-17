@@ -30,6 +30,7 @@ public class FixedLayoutEpubPackageBuilderTests
             Bounds = new BoundingBox(0.1, 0.2, 0.5, 0.05),
             Type = BlockType.Body,
             OcrText = "PDFまたはOCRの文字",
+            TextSource = TextSourceKind.PdfTextLayer,
             ReadingOrder = 0,
         });
 
@@ -66,6 +67,7 @@ public class FixedLayoutEpubPackageBuilderTests
             Assert.Contains("width=\"612\" height=\"792\"", xhtml);
             Assert.Contains("../images/page-0001.png", xhtml);
             Assert.Contains("PDFまたはOCRの文字", xhtml);
+            Assert.Contains("data-text-source=\"pdf\"", xhtml);
             Assert.Contains("left:61.2px", xhtml);
             Assert.Contains("top:158.4px", xhtml);
 

@@ -191,7 +191,8 @@ public sealed class PdfDocumentService
                 (right - left) / pageWidth,
                 (bottom - top) / pageHeight),
             text.ToString(),
-            Confidence: 1.0);
+            Confidence: 1.0,
+            Source: TextSourceKind.PdfTextLayer);
     }
 
     /// <summary>

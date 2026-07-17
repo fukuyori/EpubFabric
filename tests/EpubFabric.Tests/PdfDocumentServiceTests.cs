@@ -1,3 +1,4 @@
+using EpubFabric.Core.Models;
 using EpubFabric.Pdf;
 
 namespace EpubFabric.Tests;
@@ -27,6 +28,17 @@ public class PdfDocumentServiceTests
         var text = service.ExtractPageText(SamplePdfPath, pageNumber: 1);
 
         Assert.Contains("Hello EpubFabric", text);
+    }
+
+    [Fact]
+    public void ExtractTextLines_MarksLinesAsPdfTextLayer()
+    {
+        var service = new PdfDocumentService();
+
+        var lines = service.ExtractTextLines(SamplePdfPath, pageNumber: 1);
+
+        Assert.NotEmpty(lines);
+        Assert.All(lines, line => Assert.Equal(TextSourceKind.PdfTextLayer, line.Source));
     }
 
     [Fact]

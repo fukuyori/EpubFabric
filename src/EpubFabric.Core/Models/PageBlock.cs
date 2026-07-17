@@ -16,6 +16,8 @@ public sealed class PageBlock
 
     public double OcrConfidence { get; set; }
 
+    public TextSourceKind TextSource { get; set; }
+
     public double LayoutConfidence { get; set; }
 
     public double ClassificationConfidence { get; set; }

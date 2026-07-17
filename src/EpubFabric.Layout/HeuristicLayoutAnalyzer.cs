@@ -98,6 +98,7 @@ public sealed class HeuristicLayoutAnalyzer
             Type = type,
             OcrText = line.Text,
             OcrConfidence = line.Confidence,
+            TextSource = line.Source,
             ReadingOrder = readingOrder,
             HeadingLevel = HeadingLevelFor(type),
             IsExcluded = isExcluded,
