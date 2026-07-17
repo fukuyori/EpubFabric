@@ -45,7 +45,7 @@ public sealed class HeuristicLayoutAnalyzer
         items.AddRange(effectiveLines.Select(l => new PositionedItem(l.Bounds, l, null)));
         items.AddRange(figureRegions.Select(r => new PositionedItem(r.Bounds, null, r)));
 
-        var columns = DetectColumns(items);
+        var columns = ColumnDetector.DetectColumns(items, i => i.Bounds);
 
         var blocks = new List<PageBlock>(items.Count);
         var figureBlocks = new List<PageBlock>();
@@ -206,65 +206,6 @@ public sealed class HeuristicLayoutAnalyzer
         var lineArea = line.Width * line.Height;
 
         return lineArea > 0 && overlapArea / lineArea > 0.5;
-    }
-
-    /// <summary>
-    /// ページ中央付近に、どの行も跨がない縦の隙間（ガター）があれば2段組みとみなし、
-    /// 左段・右段に分割する。段をまたぐ幅広の項目（大きな図など）はガター判定の対象から
-    /// 除外し、独立した1項目の「段」として扱った上で、Y座標に応じて他の段と並べ替える
-    /// （段の途中への厳密な割り込みまでは行わない簡易処理）。隙間が見つからない場合は
-    /// 全体を1段組みとして扱う。
-    /// </summary>
-    private static List<List<PositionedItem>> DetectColumns(IReadOnlyList<PositionedItem> items)
-    {
-        const double gutterSearchStart = 0.40;
-        const double gutterSearchEnd = 0.60;
-        const double gutterStep = 0.01;
-        const double minColumnShare = 0.2;
-        const double maxNormalItemWidth = 0.5; // これより広い項目は最初から段をまたぐ要素として扱う。
-        const int maxCrossingTolerance = 2; // 図のキャプションなど、例外的に段をまたぐ要素を許容する数。
-
-        var normalItems = items.Where(i => i.Bounds.Width <= maxNormalItemWidth).ToList();
-        var wideItems = items.Where(i => i.Bounds.Width > maxNormalItemWidth).ToList();
-
-        List<List<PositionedItem>>? columns = null;
-
-        for (var gutterX = gutterSearchStart; gutterX <= gutterSearchEnd; gutterX += gutterStep)
-        {
-            var crossing = normalItems.Where(i => i.Bounds.X < gutterX && i.Bounds.X + i.Bounds.Width > gutterX).ToList();
-            if (crossing.Count > maxCrossingTolerance)
-            {
-                continue;
-            }
-
-            var nonCrossing = normalItems.Except(crossing).ToList();
-            var left = nonCrossing.Where(i => i.Bounds.X + i.Bounds.Width / 2 < gutterX).ToList();
-            var right = nonCrossing.Where(i => i.Bounds.X + i.Bounds.Width / 2 >= gutterX).ToList();
-
-            if (left.Count >= nonCrossing.Count * minColumnShare && right.Count >= nonCrossing.Count * minColumnShare)
-            {
-                columns = [left, right];
-                wideItems = [.. wideItems, .. crossing]; // 段をまたぐ例外行も、大きな図と同様に個別の段として扱う。
-                break;
-            }
-        }
-
-        if (columns is null)
-        {
-            // ガターが見つからない1段組みページでは、幅広の行も同じ段に属する
-            // 通常の行であり、別扱いすると読み順が崩れるため全項目を1つの段にまとめる。
-            return items.Count > 0 ? [items.OrderBy(i => i.Bounds.Y).ToList()] : [];
-        }
-
-        foreach (var wideItem in wideItems)
-        {
-            columns.Add([wideItem]);
-        }
-
-        return columns
-            .Where(c => c.Count > 0)
-            .OrderBy(c => c.Min(i => i.Bounds.Y))
-            .ToList();
     }
 
     private readonly record struct PositionedItem(BoundingBox Bounds, TextLine? Line, NonTextRegion? Region);

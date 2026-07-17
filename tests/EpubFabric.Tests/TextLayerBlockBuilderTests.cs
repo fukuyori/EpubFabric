@@ -32,6 +32,26 @@ public class TextLayerBlockBuilderTests
     }
 
     [Fact]
+    public void Build_TwoColumnPage_OrdersLeftColumnBeforeRightColumn()
+    {
+        var lines = new[]
+        {
+            new TextLine(new BoundingBox(0.55, 0.10, 0.35, 0.03), "右1", 0.9, TextSourceKind.Ocr),
+            new TextLine(new BoundingBox(0.05, 0.10, 0.35, 0.03), "左1", 0.9, TextSourceKind.Ocr),
+            new TextLine(new BoundingBox(0.55, 0.14, 0.35, 0.03), "右2", 0.9, TextSourceKind.Ocr),
+            new TextLine(new BoundingBox(0.05, 0.14, 0.35, 0.03), "左2", 0.9, TextSourceKind.Ocr),
+            new TextLine(new BoundingBox(0.05, 0.18, 0.35, 0.03), "左3", 0.9, TextSourceKind.Ocr),
+            new TextLine(new BoundingBox(0.55, 0.18, 0.35, 0.03), "右3", 0.9, TextSourceKind.Ocr),
+        };
+
+        var blocks = new TextLayerBlockBuilder().Build(1, lines);
+
+        Assert.Equal(
+            ["左1", "左2", "左3", "右1", "右2", "右3"],
+            blocks.OrderBy(b => b.ReadingOrder).Select(b => b.OcrText));
+    }
+
+    [Fact]
     public void Build_DropsOnlyEmptyLines()
     {
         var lines = new[]
