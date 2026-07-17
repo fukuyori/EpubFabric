@@ -9,6 +9,14 @@ namespace EpubFabric.Imaging;
 /// 絵柄（エッジ密度が高い塊）を図の候補、矩形の罫線を囲み記事の候補として検出する。
 /// あくまで候補の検出であり、最終的な種別判定（図かコードか等）はOllama連携
 /// （第3段階）または人手校正で行う想定。
+///
+/// 罫線を伴わない「塗りつぶし背景色」の囲み記事（日本語技術誌のコマンド例などでよく
+/// 見られる表現）はまだ検出できない。ページ全体を対象にした色領域抽出は本文中の
+/// 黒文字・アンチエイリアスのにじみと衝突してページの大部分を1つの塊とみなしてしまい、
+/// 隣接OCR行をまとめてから周辺色をサンプリングする方式も、実データ
+/// （sample/日経Linux_202309_生成AI活用大全.pdf p.90）でOCR行のまとまりが実際の色地
+/// ボックスの位置と一致しないことを確認しており、単純な行間隔ヒューリスティックでは
+/// 対応できないことがわかっている。既知の未対応事項として残す。
 /// </summary>
 public sealed class NonTextRegionDetector
 {
@@ -30,6 +38,7 @@ public sealed class NonTextRegionDetector
         var pageArea = (double)width * height;
 
         var figureRegions = DetectFigureRegions(gray, textLineBounds, width, height, pageArea);
+
         var boxedRegions = DetectBoxedRegions(gray, width, height, pageArea)
             // 罫線・枠のある写真やスクリーンショットは、外枠が「中空の矩形」として
             // 誤って囲み記事候補に検出されることがある。図として検出済みの領域と
@@ -75,6 +84,8 @@ public sealed class NonTextRegionDetector
         using var nonTextEdges = new Mat();
         Cv2.BitwiseAnd(edges, invertedTextMask, nonTextEdges);
 
+        MaskOutMargin(nonTextEdges, width, height);
+
         using var dilated = new Mat();
         using var kernel = Cv2.GetStructuringElement(MorphShapes.Rect, new Size(25, 25));
         Cv2.Dilate(nonTextEdges, dilated, kernel);
@@ -85,7 +96,8 @@ public sealed class NonTextRegionDetector
         foreach (var contour in contours)
         {
             var rect = Cv2.BoundingRect(contour);
-            var ratio = (double)rect.Width * rect.Height / pageArea;
+            var boundingArea = (double)rect.Width * rect.Height;
+            var ratio = boundingArea / pageArea;
             if (ratio is < MinFigureAreaRatio or > MaxFigureAreaRatio)
             {
                 continue;
@@ -157,6 +169,23 @@ public sealed class NonTextRegionDetector
         }
 
         return regions;
+    }
+
+    /// <summary>
+    /// ページ最外周の帯を0で塗りつぶす。罫線やテクスチャ状の装飾（縁取り）が
+    /// ページ端に入っていると、それ自体が「背景と異なる塊」として誤検出され、
+    /// 膨張処理で内側の余白ごと1つの巨大な領域に膨れ上がってしまうため。実際の
+    /// コンテンツは通常ページ端ぎりぎりには配置されない。
+    /// </summary>
+    private static void MaskOutMargin(Mat mask, int width, int height)
+    {
+        const double marginBand = 0.04;
+        var marginX = (int)(width * marginBand);
+        var marginY = (int)(height * marginBand);
+        Cv2.Rectangle(mask, new Rect(0, 0, width, marginY), Scalar.All(0), thickness: -1);
+        Cv2.Rectangle(mask, new Rect(0, height - marginY, width, marginY), Scalar.All(0), thickness: -1);
+        Cv2.Rectangle(mask, new Rect(0, 0, marginX, height), Scalar.All(0), thickness: -1);
+        Cv2.Rectangle(mask, new Rect(width - marginX, 0, marginX, height), Scalar.All(0), thickness: -1);
     }
 
     private static double MaxHoleArea(Point[][] contours, HierarchyIndex[] hierarchy, int firstChildIndex)
