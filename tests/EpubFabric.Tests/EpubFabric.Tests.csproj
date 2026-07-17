@@ -19,6 +19,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="Assets\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\EpubFabric.Core\EpubFabric.Core.csproj" />
     <ProjectReference Include="..\..\src\EpubFabric.Pdf\EpubFabric.Pdf.csproj" />
     <ProjectReference Include="..\..\src\EpubFabric.Imaging\EpubFabric.Imaging.csproj" />
