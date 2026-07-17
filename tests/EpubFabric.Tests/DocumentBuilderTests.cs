@@ -21,6 +21,88 @@ public class DocumentBuilderTests
         Assert.Equal(["p1-b1", "p2-b1", "p2-b2"], chapter.BlockIds);
     }
 
+    [Fact]
+    public void BuildChapters_SplitsAtHeadingBlocks_AndOmitsHeadingFromBody()
+    {
+        var page = new DocumentPage
+        {
+            PageNumber = 1,
+            OriginalImagePath = "page-1.png",
+            ProcessedImagePath = "page-1.png",
+            PreviewImagePath = "page-1.png",
+        };
+        page.Blocks.Add(CreateBlock("b1", BlockType.ChapterTitle, "第1章", readingOrder: 0, headingLevel: 1));
+        page.Blocks.Add(CreateBlock("b2", BlockType.Body, "本文A", readingOrder: 1));
+        page.Blocks.Add(CreateBlock("b3", BlockType.SectionHeading, "第1章 第1節", readingOrder: 2, headingLevel: 2));
+        page.Blocks.Add(CreateBlock("b4", BlockType.Body, "本文B", readingOrder: 3));
+
+        var chapters = new DocumentBuilder().BuildChapters([page], "テスト書籍");
+
+        Assert.Equal(2, chapters.Count);
+
+        Assert.Equal("第1章", chapters[0].Title);
+        Assert.Equal(1, chapters[0].HeadingLevel);
+        Assert.Equal(["b2"], chapters[0].BlockIds);
+
+        Assert.Equal("第1章 第1節", chapters[1].Title);
+        Assert.Equal(2, chapters[1].HeadingLevel);
+        Assert.Equal(["b4"], chapters[1].BlockIds);
+    }
+
+    [Fact]
+    public void BuildChapters_ContentBeforeFirstHeading_UsesFallbackTitle()
+    {
+        var page = new DocumentPage
+        {
+            PageNumber = 1,
+            OriginalImagePath = "page-1.png",
+            ProcessedImagePath = "page-1.png",
+            PreviewImagePath = "page-1.png",
+        };
+        page.Blocks.Add(CreateBlock("b1", BlockType.Body, "表紙情報", readingOrder: 0));
+        page.Blocks.Add(CreateBlock("b2", BlockType.ChapterTitle, "第1章", readingOrder: 1, headingLevel: 1));
+        page.Blocks.Add(CreateBlock("b3", BlockType.Body, "本文", readingOrder: 2));
+
+        var chapters = new DocumentBuilder().BuildChapters([page], "テスト書籍");
+
+        Assert.Equal(2, chapters.Count);
+        Assert.Equal("テスト書籍", chapters[0].Title);
+        Assert.Equal(["b1"], chapters[0].BlockIds);
+        Assert.Equal("第1章", chapters[1].Title);
+        Assert.Equal(["b3"], chapters[1].BlockIds);
+    }
+
+    [Fact]
+    public void BuildChapters_HeadingWithManualCorrection_UsesCorrectedTextAsTitle()
+    {
+        var page = new DocumentPage
+        {
+            PageNumber = 1,
+            OriginalImagePath = "page-1.png",
+            ProcessedImagePath = "page-1.png",
+            PreviewImagePath = "page-1.png",
+        };
+        var heading = CreateBlock("b1", BlockType.ChapterTitle, "誤認識された見出し", readingOrder: 0, headingLevel: 1);
+        heading.CorrectedText = "校正済みの見出し";
+        page.Blocks.Add(heading);
+        page.Blocks.Add(CreateBlock("b2", BlockType.Body, "本文", readingOrder: 1));
+
+        var chapters = new DocumentBuilder().BuildChapters([page], "テスト書籍");
+
+        Assert.Equal("校正済みの見出し", Assert.Single(chapters).Title);
+    }
+
+    private static PageBlock CreateBlock(string id, BlockType type, string text, int readingOrder, int? headingLevel = null) => new()
+    {
+        Id = id,
+        PageNumber = 1,
+        Bounds = new BoundingBox(0, 0, 1, 1),
+        Type = type,
+        OcrText = text,
+        ReadingOrder = readingOrder,
+        HeadingLevel = headingLevel,
+    };
+
     private static DocumentPage CreatePage(int pageNumber, params (string Id, int ReadingOrder, bool IsExcluded)[] blocks)
     {
         var page = new DocumentPage

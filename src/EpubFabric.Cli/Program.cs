@@ -2,6 +2,7 @@ using System.Text;
 using EpubFabric.Core.Models;
 using EpubFabric.Document;
 using EpubFabric.Epub;
+using EpubFabric.Layout;
 using EpubFabric.Ocr;
 using EpubFabric.Pdf;
 using EpubFabric.Persistence;
@@ -160,16 +161,14 @@ static int RunInfo(string[] args)
 
 static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildProjectFromPdf(string inputPath, string workDirectory, int dpi)
 {
-    // 14章の既定しきい値（OCR信頼度0.85未満は要確認）。
-    const double ReviewConfidenceThreshold = 0.85;
-
     var pdfService = new PdfDocumentService();
+    var layoutAnalyzer = new HeuristicLayoutAnalyzer();
     var info = pdfService.GetInfo(inputPath);
 
     var pagesNeedingOcr = info.Pages.Count(p => !p.HasText);
     if (pagesNeedingOcr > 0)
     {
-        Console.WriteLine($"{pagesNeedingOcr}/{info.PageCount} ページにテキストレイヤーがありません。OCR（PP-OCRv6多言語モデル）で認識します。");
+        Console.WriteLine($"{pagesNeedingOcr}/{info.PageCount} ページにテキストレイヤーがありません。OCR（PP-OCRv6多言語モデル）で認識し、行座標から見出し・段組みを推定します。");
     }
 
     Directory.CreateDirectory(workDirectory);
@@ -191,12 +190,26 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
             pdfService.RenderPageToPng(inputPath, pageNumber, imagePath, dpi);
 
             var pageInfo = info.Pages[i];
-            string? text = null;
-            var confidence = 1.0; // テキストレイヤーからの直接抽出は信頼度1.0として扱う。
+            var pageBlocks = new List<PageBlock>();
 
             if (pageInfo.HasText)
             {
-                text = pdfService.ExtractPageText(inputPath, pageNumber);
+                // テキストレイヤーには行単位の座標がないため、レイアウト解析は適用せず
+                // ページ全体を1つの本文ブロックとして扱う（信頼度1.0）。
+                var text = pdfService.ExtractPageText(inputPath, pageNumber);
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    pageBlocks.Add(new PageBlock
+                    {
+                        Id = $"p{pageNumber:0000}-b0001",
+                        PageNumber = pageNumber,
+                        Bounds = new BoundingBox(0, 0, 1, 1),
+                        Type = BlockType.Body,
+                        OcrText = text,
+                        OcrConfidence = 1.0,
+                        ReadingOrder = 0,
+                    });
+                }
             }
             else if (!ocrUnavailable)
             {
@@ -206,8 +219,7 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
                     await ocrService.InitializeAsync(new OcrModelProvisioner());
 
                     var ocrResult = ocrService.RecognizePage(imagePath);
-                    text = ocrResult.Text;
-                    confidence = ocrResult.AverageConfidence;
+                    pageBlocks = layoutAnalyzer.AnalyzePage(pageNumber, ocrResult.Lines);
                 }
                 catch (Exception ex) when (ex is OcrModelDownloadException or InvalidOperationException)
                 {
@@ -217,7 +229,7 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
                 }
             }
 
-            var requiresReview = text is not null && confidence < ReviewConfidenceThreshold;
+            reviewRequiredCount += pageBlocks.Count(b => b.RequiresReview);
 
             var page = new DocumentPage
             {
@@ -228,35 +240,16 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
                 Width = pageInfo.WidthPoints,
                 Height = pageInfo.HeightPoints,
                 WritingMode = WritingMode.Horizontal,
-                Status = text is not null ? PageProcessingStatus.OcrCompleted : PageProcessingStatus.Error,
+                Status = pageBlocks.Count > 0 ? PageProcessingStatus.OcrCompleted : PageProcessingStatus.Error,
             };
-
-            if (!string.IsNullOrWhiteSpace(text))
-            {
-                if (requiresReview)
-                {
-                    reviewRequiredCount++;
-                }
-
-                page.Blocks.Add(new PageBlock
-                {
-                    Id = $"p{pageNumber:0000}-b0001",
-                    PageNumber = pageNumber,
-                    Bounds = new BoundingBox(0, 0, 1, 1),
-                    Type = BlockType.Body,
-                    OcrText = text,
-                    OcrConfidence = confidence,
-                    ReadingOrder = 0,
-                    RequiresReview = requiresReview,
-                });
-            }
+            page.Blocks.AddRange(pageBlocks);
 
             pages.Add(page);
         }
 
         if (reviewRequiredCount > 0)
         {
-            Console.WriteLine($"{reviewRequiredCount} ページがOCR信頼度{ReviewConfidenceThreshold:0.00}未満のため要確認です。");
+            Console.WriteLine($"{reviewRequiredCount} 件のブロックがOCR信頼度0.85未満のため要確認です。");
         }
 
         var project = new EpubFabricProject

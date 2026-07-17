@@ -1,8 +1,10 @@
 using RapidOcrNet;
+using SkiaSharp;
+using CoreTextLine = EpubFabric.Core.Models.TextLine;
 
 namespace EpubFabric.Ocr;
 
-public sealed record PageOcrResult(string Text, double AverageConfidence);
+public sealed record PageOcrResult(string Text, double AverageConfidence, IReadOnlyList<CoreTextLine> Lines);
 
 /// <summary>
 /// 9.5 OCR：ページ画像に対してPP-OCRv6（多言語・日本語含む）でテキスト認識を行う。
@@ -49,7 +51,31 @@ public sealed class PageOcrService : IDisposable
 
         var confidence = blockAverages.Count > 0 ? blockAverages.Average() : 0.0;
 
-        return new PageOcrResult(result.StrRes, confidence);
+        var imageSize = SKBitmap.DecodeBounds(imagePath);
+        var lines = result.TextBlocks
+            .Where(b => !string.IsNullOrWhiteSpace(b.Text))
+            .Select(b => ToTextLine(b, imageSize.Width, imageSize.Height))
+            .ToList();
+
+        return new PageOcrResult(result.StrRes, confidence, lines);
+    }
+
+    private static CoreTextLine ToTextLine(TextBlock block, int imageWidth, int imageHeight)
+    {
+        var minX = block.BoxPoints.Min(p => p.X);
+        var maxX = block.BoxPoints.Max(p => p.X);
+        var minY = block.BoxPoints.Min(p => p.Y);
+        var maxY = block.BoxPoints.Max(p => p.Y);
+
+        var bounds = new EpubFabric.Core.Models.BoundingBox(
+            (double)minX / imageWidth,
+            (double)minY / imageHeight,
+            (double)(maxX - minX) / imageWidth,
+            (double)(maxY - minY) / imageHeight);
+
+        var confidence = block.CharScores is { Length: > 0 } ? block.CharScores.Average() : 0.0;
+
+        return new CoreTextLine(bounds, block.Text, confidence);
     }
 
     public void Dispose() => _ocr.Dispose();
