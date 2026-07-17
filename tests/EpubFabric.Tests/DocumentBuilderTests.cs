@@ -22,7 +22,7 @@ public class DocumentBuilderTests
     }
 
     [Fact]
-    public void BuildChapters_SplitsAtHeadingBlocks_AndOmitsHeadingFromBody()
+    public void BuildChapters_SplitsAtChapterTitleOnly_AndKeepsSectionHeadingInBody()
     {
         var page = new DocumentPage
         {
@@ -35,6 +35,8 @@ public class DocumentBuilderTests
         page.Blocks.Add(CreateBlock("b2", BlockType.Body, "本文A", readingOrder: 1));
         page.Blocks.Add(CreateBlock("b3", BlockType.SectionHeading, "第1章 第1節", readingOrder: 2, headingLevel: 2));
         page.Blocks.Add(CreateBlock("b4", BlockType.Body, "本文B", readingOrder: 3));
+        page.Blocks.Add(CreateBlock("b5", BlockType.ChapterTitle, "第2章", readingOrder: 4, headingLevel: 1));
+        page.Blocks.Add(CreateBlock("b6", BlockType.Body, "本文C", readingOrder: 5));
 
         var chapters = new DocumentBuilder().BuildChapters([page], "テスト書籍");
 
@@ -42,11 +44,11 @@ public class DocumentBuilderTests
 
         Assert.Equal("第1章", chapters[0].Title);
         Assert.Equal(1, chapters[0].HeadingLevel);
-        Assert.Equal(["b2"], chapters[0].BlockIds);
+        // 節見出し（b3）は章の区切りにせず、章内の<h2>として本文に残す。
+        Assert.Equal(["b2", "b3", "b4"], chapters[0].BlockIds);
 
-        Assert.Equal("第1章 第1節", chapters[1].Title);
-        Assert.Equal(2, chapters[1].HeadingLevel);
-        Assert.Equal(["b4"], chapters[1].BlockIds);
+        Assert.Equal("第2章", chapters[1].Title);
+        Assert.Equal(["b6"], chapters[1].BlockIds);
     }
 
     [Fact]

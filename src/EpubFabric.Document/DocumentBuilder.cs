@@ -4,11 +4,11 @@ namespace EpubFabric.Document;
 
 /// <summary>
 /// 9.8 文書構造化：ページ単位のブロックを書籍全体の章構造へ変換する。
-/// 見出し（ChapterTitle・SectionHeading）が1つも検出されていない場合（テキストレイヤー
-/// からの抽出のみで、まだレイアウト解析を通していない場合など）は、従来どおり全体を
-/// 1つの章にまとめる。見出しが検出されている場合は、見出しごとに章を区切る（見出しの
-/// 階層をそのまま章・節として使うのは簡易な近似であり、厳密な章構造の判定は
-/// Ollama連携（第3段階）で補正する）。
+/// 章の区切りに使うのはChapterTitle（章・記事の大見出し）のみ。SectionHeading・
+/// Subheadingは章内の見出し（h2/h3）として本文に残す。かつてはSectionHeadingでも
+/// 章を区切っていたが、それでは節見出しがすべて章タイトル（常にh1描画）に消費されて
+/// h2が出力されず、誤分類された本文断片まで章になってしまう。ChapterTitleが1つも
+/// 検出されていない場合は全体を1つの章にまとめる。
 /// </summary>
 public sealed class DocumentBuilder
 {
@@ -20,7 +20,7 @@ public sealed class DocumentBuilder
             .Where(b => !b.IsExcluded)
             .ToList();
 
-        var hasHeadings = orderedBlocks.Any(b => b.Type is BlockType.ChapterTitle or BlockType.SectionHeading);
+        var hasHeadings = orderedBlocks.Any(b => b.Type is BlockType.ChapterTitle);
         if (!hasHeadings)
         {
             return [BuildSingleChapter(fallbackTitle, orderedBlocks)];
@@ -30,7 +30,7 @@ public sealed class DocumentBuilder
 
         foreach (var block in orderedBlocks)
         {
-            if (block.Type is BlockType.ChapterTitle or BlockType.SectionHeading)
+            if (block.Type is BlockType.ChapterTitle)
             {
                 var title = string.IsNullOrWhiteSpace(block.CorrectedText) ? block.OcrText : block.CorrectedText;
                 sections.Add((title, block.HeadingLevel ?? 1, []));

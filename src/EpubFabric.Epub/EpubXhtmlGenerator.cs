@@ -15,7 +15,8 @@ public sealed class EpubXhtmlGenerator
     public XDocument GenerateChapter(DocumentChapter chapter, IReadOnlyDictionary<string, PageBlock> blocksById)
     {
         var chapterTitle = XmlTextSanitizer.Sanitize(chapter.Title);
-        var body = new XElement(Xhtml + "body", new XElement(Xhtml + "h1", chapterTitle));
+        var titleTag = $"h{Math.Clamp(chapter.HeadingLevel, 1, 6)}";
+        var body = new XElement(Xhtml + "body", new XElement(Xhtml + titleTag, chapterTitle));
 
         foreach (var element in GenerateBlockElements(chapter.BlockIds, blocksById))
         {
