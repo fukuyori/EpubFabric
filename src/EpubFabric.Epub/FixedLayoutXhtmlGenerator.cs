@@ -15,11 +15,14 @@ public sealed class FixedLayoutXhtmlGenerator
     {
         var pageWidth = Math.Max(1, page.Width);
         var pageHeight = Math.Max(1, page.Height);
+        var canvasStyle = $"width:{pageWidth}px;height:{pageHeight}px";
 
         var image = new XElement(
             Xhtml + "img",
             new XAttribute("class", "page-image"),
             new XAttribute("src", $"../images/{imageFileName}"),
+            new XAttribute("width", pageWidth),
+            new XAttribute("height", pageHeight),
             new XAttribute("alt", string.Empty),
             new XAttribute("role", "presentation"));
 
@@ -43,6 +46,7 @@ public sealed class FixedLayoutXhtmlGenerator
         var pageContainer = new XElement(
             Xhtml + "section",
             new XAttribute("class", "page-container"),
+            new XAttribute("style", canvasStyle),
             new XAttribute("aria-label", $"Page {page.PageNumber}"),
             image,
             textLayer);
@@ -56,13 +60,16 @@ public sealed class FixedLayoutXhtmlGenerator
                 new XElement(
                     Xhtml + "meta",
                     new XAttribute("name", "viewport"),
-                    new XAttribute("content", $"width={pageWidth},height={pageHeight}")),
+                    new XAttribute("content", $"width={pageWidth}, height={pageHeight}")),
                 new XElement(
                     Xhtml + "link",
                     new XAttribute("rel", "stylesheet"),
                     new XAttribute("type", "text/css"),
                     new XAttribute("href", "../styles/fixed-layout.css"))),
-            new XElement(Xhtml + "body", pageContainer));
+            new XElement(
+                Xhtml + "body",
+                new XAttribute("style", canvasStyle),
+                pageContainer));
 
         return new XDocument(new XDeclaration("1.0", "UTF-8", null), html);
     }

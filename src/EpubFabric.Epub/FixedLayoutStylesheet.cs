@@ -18,8 +18,6 @@ public static class FixedLayoutStylesheet
 
         .page-container {
             position: relative;
-            width: 100%;
-            height: 100%;
             margin: 0;
             padding: 0;
             overflow: hidden;
@@ -33,7 +31,9 @@ public static class FixedLayoutStylesheet
             height: 100%;
             margin: 0;
             padding: 0;
-            object-fit: fill;
+            max-width: none;
+            max-height: none;
+            object-fit: contain;
             user-select: none;
             -webkit-user-select: none;
         }

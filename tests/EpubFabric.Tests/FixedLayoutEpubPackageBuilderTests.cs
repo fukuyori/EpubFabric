@@ -60,7 +60,10 @@ public class FixedLayoutEpubPackageBuilderTests
             Assert.Contains("page-progression-direction=\"ltr\"", package);
 
             var xhtml = ReadEntry(zip, "EPUB/text/page-0001.xhtml");
-            Assert.Contains("content=\"width=612,height=792\"", xhtml);
+            Assert.Contains("content=\"width=612, height=792\"", xhtml);
+            Assert.Contains("<body style=\"width:612px;height:792px\"", xhtml);
+            Assert.Contains("class=\"page-container\" style=\"width:612px;height:792px\"", xhtml);
+            Assert.Contains("width=\"612\" height=\"792\"", xhtml);
             Assert.Contains("../images/page-0001.png", xhtml);
             Assert.Contains("PDFまたはOCRの文字", xhtml);
             Assert.Contains("left:61.2px", xhtml);
@@ -68,6 +71,8 @@ public class FixedLayoutEpubPackageBuilderTests
 
             var css = ReadEntry(zip, "EPUB/styles/fixed-layout.css");
             Assert.Contains("color: transparent", css);
+            Assert.Contains("object-fit: contain", css);
+            Assert.DoesNotContain("object-fit: fill", css);
             Assert.DoesNotContain("display: none", css);
         }
         finally
