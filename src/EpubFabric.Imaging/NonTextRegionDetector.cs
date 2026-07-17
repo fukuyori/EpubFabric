@@ -29,10 +29,28 @@ public sealed class NonTextRegionDetector
         var height = gray.Height;
         var pageArea = (double)width * height;
 
+        var figureRegions = DetectFigureRegions(gray, textLineBounds, width, height, pageArea);
+        var boxedRegions = DetectBoxedRegions(gray, width, height, pageArea)
+            // 罫線・枠のある写真やスクリーンショットは、外枠が「中空の矩形」として
+            // 誤って囲み記事候補に検出されることがある。図として検出済みの領域と
+            // 大きく重なるものは除外する（図の判定を優先する）。
+            .Where(boxed => !figureRegions.Any(figure => OverlapsSignificantly(boxed.Bounds, figure.Bounds)))
+            .ToList();
+
         var regions = new List<NonTextRegion>();
-        regions.AddRange(DetectFigureRegions(gray, textLineBounds, width, height, pageArea));
-        regions.AddRange(DetectBoxedRegions(gray, width, height, pageArea));
+        regions.AddRange(figureRegions);
+        regions.AddRange(boxedRegions);
         return regions;
+    }
+
+    private static bool OverlapsSignificantly(BoundingBox a, BoundingBox b)
+    {
+        var overlapX = Math.Max(0, Math.Min(a.X + a.Width, b.X + b.Width) - Math.Max(a.X, b.X));
+        var overlapY = Math.Max(0, Math.Min(a.Y + a.Height, b.Y + b.Height) - Math.Max(a.Y, b.Y));
+        var overlapArea = overlapX * overlapY;
+        var smallerArea = Math.Min(a.Width * a.Height, b.Width * b.Height);
+
+        return smallerArea > 0 && overlapArea / smallerArea > 0.5;
     }
 
     /// <summary>
