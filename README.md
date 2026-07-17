@@ -31,6 +31,21 @@ dotnet build
 dotnet test
 ```
 
+## 配布用実行ファイルの作成
+
+```powershell
+# 自己完結型（.NETランタイム同梱）を publish\EpubFabric.Cli\win-x64\ に出力
+.\scripts\publish.ps1
+
+# 単一EXEにまとめる場合
+.\scripts\publish.ps1 -SingleFile
+
+# テストを省略して急ぐ場合
+.\scripts\publish.ps1 -SkipTests
+```
+
+出力された `epubfabric.exe` は .NET のインストールされていない Windows でもそのまま実行できます。
+
 ## 使い方（CLI）
 
 ```powershell
