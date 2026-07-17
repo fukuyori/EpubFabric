@@ -71,7 +71,7 @@ static async Task<int> RunConvert(string[] args)
         ollamaOptions,
         preserveAllTextLines: layout == OutputLayout.Fixed);
 
-    BuildEpub(project, layout, outputPath);
+    BuildEpub(project, layout, outputPath, ParsePageImageOptions(options));
 
     Console.WriteLine($"{LayoutLabel(layout)}EPUBを生成しました: {outputPath}");
     return 0;
@@ -224,17 +224,18 @@ static int RunExport(string[] args)
         Console.WriteLine($"{correctedCount} 件の校正済みブロックを反映します。");
     }
 
-    BuildEpub(project, layout, outputPath);
+    BuildEpub(project, layout, outputPath, ParsePageImageOptions(options));
 
     Console.WriteLine($"{LayoutLabel(layout)}EPUBを生成しました: {outputPath}");
     return 0;
 }
 
-static void BuildEpub(EpubFabricProject project, OutputLayout layout, string outputPath)
+static void BuildEpub(EpubFabricProject project, OutputLayout layout, string outputPath, PageImageOptions? imageOptions = null)
 {
     if (layout == OutputLayout.Fixed)
     {
-        new FixedLayoutEpubPackageBuilder().Build(project, outputPath);
+        imageOptions ??= new PageImageOptions(85, 2200);
+        new FixedLayoutEpubPackageBuilder(imageOptions.JpegQuality, imageOptions.MaxSideLength).Build(project, outputPath);
         return;
     }
 
@@ -580,6 +581,25 @@ static (string? PositionalArg, Dictionary<string, string> Options) ParseOptions(
 static int ParseDpi(Dictionary<string, string> options) =>
     options.TryGetValue("--dpi", out var value) ? int.Parse(value) : 300;
 
+// 固定レイアウトのページ画像収録設定（12章）。既定はJPEG品質85・長辺2200px。
+// --max-image-size 0 で無制限（再圧縮もしない従来動作に近い挙動）を選べる。
+static PageImageOptions ParsePageImageOptions(Dictionary<string, string> options)
+{
+    var quality = 85;
+    if (options.TryGetValue("--image-quality", out var qualityValue) && int.TryParse(qualityValue, out var parsedQuality))
+    {
+        quality = Math.Clamp(parsedQuality, 1, 100);
+    }
+
+    var maxSide = 2200;
+    if (options.TryGetValue("--max-image-size", out var sizeValue) && int.TryParse(sizeValue, out var parsedSize))
+    {
+        maxSide = parsedSize;
+    }
+
+    return new PageImageOptions(quality, maxSide);
+}
+
 static OllamaOptions ParseOllamaOptions(Dictionary<string, string> options) => new(
     Enabled: options.ContainsKey("--ollama"),
     Endpoint: options.GetValueOrDefault("--ollama-endpoint", "http://localhost:11434"),
@@ -600,18 +620,21 @@ static void PrintUsage()
 {
     Console.WriteLine("使い方:");
     Console.WriteLine("  epubfabric info <input.pdf>");
-    Console.WriteLine("  epubfabric convert <input.pdf> [--output <output.epub>] [--layout <fixed|reflow>] [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
+    Console.WriteLine("  epubfabric convert <input.pdf> [--output <output.epub>] [--layout <fixed|reflow>] [--dpi <dpi>] [--image-quality <1-100>] [--max-image-size <px>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric evaluate <input.pdf> [--report <report-dir>] [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric analyze <input.pdf> --project <book.efproj> [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
-    Console.WriteLine("  epubfabric export <book.efproj> --format epub [--output <output.epub>] [--layout <fixed|reflow>]");
+    Console.WriteLine("  epubfabric export <book.efproj> --format epub [--output <output.epub>] [--layout <fixed|reflow>] [--image-quality <1-100>] [--max-image-size <px>]");
     Console.WriteLine();
     Console.WriteLine("  convert/export は固定レイアウトEPUBを生成します。従来のリフロー型は --layout reflow で選択できます。");
     Console.WriteLine("  evaluate はEPUBを生成せず、ページ画像+検出ブロックと生成されるEPUB断片を左右対照したHTMLレポート（index.html）と定量メトリクス（metrics.json）を出力します。");
-    Console.WriteLine("  --ollama を指定すると、Ollamaによる意味分類（見出し・本文などの補正）を行います（既定では無効）。");
+    Console.WriteLine("  固定レイアウトのページ画像はJPEG品質85・長辺2200pxへ再圧縮して収録します（--image-quality / --max-image-size で変更、--max-image-size 0 で縮小なし）。");
+    Console.WriteLine("  --ollama を指定すると、Ollamaによる意味分類（見出し・本文などの補正）とOCR文字列の校正を行います（既定では無効）。");
     Console.WriteLine("  --ollama-model の既定値: gemma4:12b / --ollama-endpoint の既定値: http://localhost:11434");
 }
 
 sealed record OllamaOptions(bool Enabled, string Endpoint, string Model);
+
+sealed record PageImageOptions(int JpegQuality, int MaxSideLength);
 
 enum OutputLayout
 {

@@ -1,11 +1,141 @@
 using System.IO.Compression;
 using EpubFabric.Core.Models;
 using EpubFabric.Epub;
+using SkiaSharp;
 
 namespace EpubFabric.Tests;
 
 public class FixedLayoutEpubPackageBuilderTests
 {
+    [Fact]
+    public void Build_LargePageImage_IsDownscaledAndRecompressedToJpeg()
+    {
+        var tempDirectory = Path.Combine(Path.GetTempPath(), $"epubfabric-fixed-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDirectory);
+        var imagePath = Path.Combine(tempDirectory, "source.png");
+        CreateLargePng(imagePath, width: 2600, height: 3600);
+
+        var page = new DocumentPage
+        {
+            PageNumber = 1,
+            OriginalImagePath = imagePath,
+            ProcessedImagePath = imagePath,
+            PreviewImagePath = imagePath,
+            Width = 612,
+            Height = 792,
+        };
+        var project = new EpubFabricProject
+        {
+            Id = Guid.NewGuid(),
+            Title = "画像圧縮試験",
+            SourcePdfPath = "source.pdf",
+            Pages = [page],
+        };
+        var outputPath = Path.Combine(tempDirectory, "book.epub");
+
+        try
+        {
+            new FixedLayoutEpubPackageBuilder(jpegQuality: 85, maxImageSideLength: 2200).Build(project, outputPath);
+
+            using var zip = ZipFile.OpenRead(outputPath);
+            var imageEntry = zip.GetEntry("EPUB/images/page-0001.jpg");
+            Assert.NotNull(imageEntry);
+
+            using var stream = new MemoryStream();
+            using (var entryStream = imageEntry.Open())
+            {
+                entryStream.CopyTo(stream);
+            }
+
+            var bounds = SKBitmap.DecodeBounds(stream.ToArray());
+            Assert.Equal(2200, Math.Max(bounds.Width, bounds.Height));
+
+            // XHTMLはjpg版の画像を参照し、キャンバス寸法はPDFポイントのまま（座標へ影響しない）。
+            var xhtml = ReadEntry(zip, "EPUB/text/page-0001.xhtml");
+            Assert.Contains("../images/page-0001.jpg", xhtml);
+            Assert.Contains("width:612px;height:792px", xhtml);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Build_MaxImageSizeZero_KeepsOriginalResolution()
+    {
+        var tempDirectory = Path.Combine(Path.GetTempPath(), $"epubfabric-fixed-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDirectory);
+        var imagePath = Path.Combine(tempDirectory, "source.png");
+        CreateLargePng(imagePath, width: 2600, height: 3600);
+
+        var page = new DocumentPage
+        {
+            PageNumber = 1,
+            OriginalImagePath = imagePath,
+            ProcessedImagePath = imagePath,
+            PreviewImagePath = imagePath,
+            Width = 612,
+            Height = 792,
+        };
+        var project = new EpubFabricProject
+        {
+            Id = Guid.NewGuid(),
+            Title = "画像無制限試験",
+            SourcePdfPath = "source.pdf",
+            Pages = [page],
+        };
+        var outputPath = Path.Combine(tempDirectory, "book.epub");
+
+        try
+        {
+            new FixedLayoutEpubPackageBuilder(jpegQuality: 85, maxImageSideLength: 0).Build(project, outputPath);
+
+            using var zip = ZipFile.OpenRead(outputPath);
+            var imageEntry = zip.GetEntry("EPUB/images/page-0001.jpg");
+            Assert.NotNull(imageEntry);
+
+            using var stream = new MemoryStream();
+            using (var entryStream = imageEntry.Open())
+            {
+                entryStream.CopyTo(stream);
+            }
+
+            // 上限なしでは縮小されない（大きなPNGのJPEG化のみ行われる）。
+            var bounds = SKBitmap.DecodeBounds(stream.ToArray());
+            Assert.Equal(3600, Math.Max(bounds.Width, bounds.Height));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    /// <summary>写真的なノイズを含む大きなPNGを作る（一様な塗りだと数KBに縮み、再圧縮条件に入らないため）。</summary>
+    private static void CreateLargePng(string path, int width, int height)
+    {
+        using var bitmap = new SKBitmap(width, height);
+        var random = new Random(12345);
+        for (var y = 0; y < height; y += 8)
+        {
+            for (var x = 0; x < width; x += 8)
+            {
+                var color = new SKColor((byte)random.Next(256), (byte)random.Next(256), (byte)random.Next(256));
+                for (var dy = 0; dy < 8 && y + dy < height; dy++)
+                {
+                    for (var dx = 0; dx < 8 && x + dx < width; dx++)
+                    {
+                        bitmap.SetPixel(x + dx, y + dy, color);
+                    }
+                }
+            }
+        }
+
+        using var image = SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+        File.WriteAllBytes(path, data.ToArray());
+    }
+
     [Fact]
     public void Build_WritesOneFixedLayoutDocumentAndImagePerPdfPage()
     {

@@ -2,15 +2,28 @@ using System.IO.Compression;
 using System.Text;
 using System.Xml.Linq;
 using EpubFabric.Core.Models;
+using SkiaSharp;
 
 namespace EpubFabric.Epub;
 
 /// <summary>
 /// PDFの1ページをEPUBの1ページとして収録する固定レイアウトEPUB 3パッケージ生成器。
 /// ページ画像が表示を保証し、ブロック文字列は透明テキスト層として付加される。
+/// 300dpiのページPNGをそのまま収録すると1冊で数百MBになるため、大きなページ画像は
+/// JPEGへ再圧縮し長辺を上限に収める。XHTML側の座標はPDFポイント基準のキャンバスに
+/// CSSで伸縮表示されるため、画像の縮小はテキスト層の位置に影響しない。
 /// </summary>
 public sealed class FixedLayoutEpubPackageBuilder
 {
+    /// <summary>ページ画像をJPEG化する際の品質。スキャン紙面の文字が読める下限より余裕を持たせた値。</summary>
+    private const int DefaultJpegQuality = 85;
+
+    /// <summary>ページ画像の長辺の上限。一般的な電子書籍端末・タブレットの表示には2200pxで十分。</summary>
+    private const int DefaultMaxImageSideLength = 2200;
+
+    /// <summary>このサイズ以下のPNGは再圧縮しない（小さな画像はJPEG化の劣化に見合わない）。</summary>
+    private const long PngRecompressionThresholdBytes = 200 * 1024;
+
     private static readonly XNamespace Xhtml = "http://www.w3.org/1999/xhtml";
     private static readonly XNamespace EpubOps = "http://www.idpf.org/2007/ops";
     private static readonly XNamespace Opf = "http://www.idpf.org/2007/opf";
@@ -18,6 +31,16 @@ public sealed class FixedLayoutEpubPackageBuilder
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
     private readonly FixedLayoutXhtmlGenerator _xhtmlGenerator = new();
+    private readonly int _jpegQuality;
+    private readonly int _maxImageSideLength;
+
+    /// <param name="jpegQuality">ページ画像をJPEG化する際の品質（1～100）。</param>
+    /// <param name="maxImageSideLength">ページ画像の長辺の上限px。0以下で無制限。</param>
+    public FixedLayoutEpubPackageBuilder(int jpegQuality = DefaultJpegQuality, int maxImageSideLength = DefaultMaxImageSideLength)
+    {
+        _jpegQuality = Math.Clamp(jpegQuality, 1, 100);
+        _maxImageSideLength = maxImageSideLength <= 0 ? int.MaxValue : maxImageSideLength;
+    }
 
     public void Build(EpubFabricProject project, string outputEpubPath)
     {
@@ -36,10 +59,7 @@ public sealed class FixedLayoutEpubPackageBuilder
         File.Delete(outputEpubPath);
 
         var pageResources = pages
-            .Select((page, index) => new PageResource(
-                page,
-                XhtmlFileName(index),
-                ImageFileName(index, page.OriginalImagePath)))
+            .Select((page, index) => PrepareImage(page, index))
             .ToList();
 
         using var zip = ZipFile.Open(outputEpubPath, ZipArchiveMode.Create);
@@ -62,24 +82,75 @@ public sealed class FixedLayoutEpubPackageBuilder
                 $"EPUB/text/{resource.XhtmlFileName}",
                 _xhtmlGenerator.GeneratePage(resource.Page, resource.ImageFileName, project.Language));
 
-            zip.CreateEntryFromFile(
-                resource.Page.OriginalImagePath,
-                $"EPUB/images/{resource.ImageFileName}",
-                CompressionLevel.Optimal);
+            if (resource.TranscodedImage is not null)
+            {
+                var entry = zip.CreateEntry($"EPUB/images/{resource.ImageFileName}", CompressionLevel.Optimal);
+                using var stream = entry.Open();
+                stream.Write(resource.TranscodedImage);
+            }
+            else
+            {
+                zip.CreateEntryFromFile(
+                    resource.Page.OriginalImagePath,
+                    $"EPUB/images/{resource.ImageFileName}",
+                    CompressionLevel.Optimal);
+            }
         }
     }
 
     private static string XhtmlFileName(int index) => $"page-{index + 1:0000}.xhtml";
 
-    private static string ImageFileName(int index, string sourcePath)
+    /// <summary>
+    /// ページ画像の収録形態を決める。長辺が上限を超える場合は縮小してJPEG化、
+    /// 上限内でも大きなPNGはJPEG化、それ以外（小さな画像・既存JPEG等）はそのまま収録する。
+    /// </summary>
+    private PageResource PrepareImage(DocumentPage page, int index)
     {
+        var sourcePath = page.OriginalImagePath;
         var extension = Path.GetExtension(sourcePath).ToLowerInvariant();
         if (extension is not ".png" and not ".jpg" and not ".jpeg" and not ".webp")
         {
             throw new NotSupportedException($"固定レイアウトEPUBへ収録できないページ画像形式です: {extension}");
         }
 
-        return $"page-{index + 1:0000}{extension}";
+        var bounds = SKBitmap.DecodeBounds(sourcePath);
+        var longSide = Math.Max(bounds.Width, bounds.Height);
+        var needsTranscode = bounds.Width > 0
+            && (longSide > _maxImageSideLength
+                || (extension == ".png" && new FileInfo(sourcePath).Length > PngRecompressionThresholdBytes));
+
+        if (!needsTranscode)
+        {
+            return new PageResource(page, XhtmlFileName(index), $"page-{index + 1:0000}{extension}", null);
+        }
+
+        return new PageResource(page, XhtmlFileName(index), $"page-{index + 1:0000}.jpg", TranscodeToJpeg(sourcePath));
+    }
+
+    private byte[] TranscodeToJpeg(string sourcePath)
+    {
+        using var original = SKBitmap.Decode(sourcePath)
+            ?? throw new NotSupportedException($"ページ画像を読み込めません: {sourcePath}");
+
+        var scale = Math.Min(1.0, (double)_maxImageSideLength / Math.Max(original.Width, original.Height));
+        var width = Math.Max(1, (int)Math.Round(original.Width * scale));
+        var height = Math.Max(1, (int)Math.Round(original.Height * scale));
+
+        // JPEGは透過を持てないため、白地に合成しながら目的サイズへ描画する。
+        using var opaque = new SKBitmap(new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Opaque));
+        using (var canvas = new SKCanvas(opaque))
+        using (var sourceImage = SKImage.FromBitmap(original))
+        {
+            canvas.Clear(SKColors.White);
+            canvas.DrawImage(
+                sourceImage,
+                new SKRect(0, 0, width, height),
+                new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear));
+        }
+
+        using var image = SKImage.FromBitmap(opaque);
+        using var data = image.Encode(SKEncodedImageFormat.Jpeg, _jpegQuality);
+        return data.ToArray();
     }
 
     private static string ImageMediaType(string fileName) => Path.GetExtension(fileName).ToLowerInvariant() switch
@@ -230,5 +301,6 @@ public sealed class FixedLayoutEpubPackageBuilder
     private sealed record PageResource(
         DocumentPage Page,
         string XhtmlFileName,
-        string ImageFileName);
+        string ImageFileName,
+        byte[]? TranscodedImage);
 }
