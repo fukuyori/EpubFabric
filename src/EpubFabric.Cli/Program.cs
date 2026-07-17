@@ -5,6 +5,7 @@ using EpubFabric.Epub;
 using EpubFabric.Imaging;
 using EpubFabric.Layout;
 using EpubFabric.Ocr;
+using EpubFabric.Ollama;
 using EpubFabric.Pdf;
 using EpubFabric.Persistence;
 
@@ -54,9 +55,10 @@ static async Task<int> RunConvert(string[] args)
 
     var outputPath = options.GetValueOrDefault("--output") ?? Path.ChangeExtension(inputPath, ".epub");
     var dpi = ParseDpi(options);
+    var ollamaOptions = ParseOllamaOptions(options);
 
     var workDirectory = Path.Combine(Path.GetTempPath(), $"epubfabric-{Guid.NewGuid():N}");
-    var (project, pages) = await BuildProjectFromPdf(inputPath, workDirectory, dpi);
+    var (project, pages) = await BuildProjectFromPdf(inputPath, workDirectory, dpi, ollamaOptions);
 
     var chapters = new DocumentBuilder().BuildChapters(pages, project.Title);
     var blocksById = pages.SelectMany(p => p.Blocks).ToDictionary(b => b.Id);
@@ -81,8 +83,9 @@ static async Task<int> RunAnalyze(string[] args)
     }
 
     var dpi = ParseDpi(options);
+    var ollamaOptions = ParseOllamaOptions(options);
     var workDirectory = Path.Combine(Path.GetTempPath(), $"epubfabric-{Guid.NewGuid():N}");
-    var (project, _) = await BuildProjectFromPdf(inputPath, workDirectory, dpi);
+    var (project, _) = await BuildProjectFromPdf(inputPath, workDirectory, dpi, ollamaOptions);
 
     new EfprojStore().Save(project, projectDirectory);
 
@@ -160,13 +163,31 @@ static int RunInfo(string[] args)
     return 0;
 }
 
-static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildProjectFromPdf(string inputPath, string workDirectory, int dpi)
+static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildProjectFromPdf(
+    string inputPath, string workDirectory, int dpi, OllamaOptions? ollamaOptions = null)
 {
     var pdfService = new PdfDocumentService();
     var layoutAnalyzer = new HeuristicLayoutAnalyzer();
     var regionDetector = new NonTextRegionDetector();
     var figureExtractor = new FigureImageExtractor();
     var info = pdfService.GetInfo(inputPath);
+
+    PageBlockClassifier? classifier = null;
+
+    if (ollamaOptions is { Enabled: true })
+    {
+        var client = new OllamaClient(ollamaOptions.Endpoint);
+        if (await client.IsAvailableAsync())
+        {
+            classifier = new PageBlockClassifier(client, ollamaOptions.Model);
+            Console.WriteLine($"Ollama({ollamaOptions.Model})による意味分類を行います。");
+        }
+        else
+        {
+            // 16章「Ollamaに接続できない」: Ollamaなしで処理を継続する。
+            Console.WriteLine($"警告: Ollamaサーバー（{ollamaOptions.Endpoint}）に接続できません。Ollamaなしで処理を続けます。");
+        }
+    }
 
     var pagesNeedingOcr = info.Pages.Count(p => !p.HasText);
     if (pagesNeedingOcr > 0)
@@ -256,6 +277,23 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
             };
             page.Blocks.AddRange(pageBlocks);
 
+            if (classifier is not null && pageBlocks.Count > 0)
+            {
+                try
+                {
+                    var changedCount = await classifier.ClassifyPageAsync(page);
+                    if (changedCount > 0)
+                    {
+                        Console.WriteLine($"  Ollamaにより{changedCount}件のブロック分類を更新しました。");
+                    }
+                }
+                catch (OllamaClassificationException ex)
+                {
+                    // 16章「Ollama応答不正」: 規則ベースの結果をそのまま使用し、処理を継続する。
+                    Console.WriteLine($"警告: Ollamaによる分類に失敗しました（{ex.Message}）。規則ベースの分類のまま続けます。");
+                }
+            }
+
             pages.Add(page);
         }
 
@@ -289,7 +327,11 @@ static (string? PositionalArg, Dictionary<string, string> Options) ParseOptions(
     {
         if (args[i].StartsWith("--", StringComparison.Ordinal))
         {
-            options[args[i]] = i + 1 < args.Length ? args[++i] : string.Empty;
+            // 値なしのフラグ（例: --ollama）が直後に別のフラグを取り込んでしまわないよう、
+            // 次のトークンが "--" で始まる場合は値として消費しない。
+            options[args[i]] = i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal)
+                ? args[++i]
+                : string.Empty;
         }
         else
         {
@@ -302,6 +344,11 @@ static (string? PositionalArg, Dictionary<string, string> Options) ParseOptions(
 
 static int ParseDpi(Dictionary<string, string> options) =>
     options.TryGetValue("--dpi", out var value) ? int.Parse(value) : 300;
+
+static OllamaOptions ParseOllamaOptions(Dictionary<string, string> options) => new(
+    Enabled: options.ContainsKey("--ollama"),
+    Endpoint: options.GetValueOrDefault("--ollama-endpoint", "http://localhost:11434"),
+    Model: options.GetValueOrDefault("--ollama-model", "gemma4:12b"));
 
 static bool RequireExistingFile(string path)
 {
@@ -318,7 +365,12 @@ static void PrintUsage()
 {
     Console.WriteLine("使い方:");
     Console.WriteLine("  epubfabric info <input.pdf>");
-    Console.WriteLine("  epubfabric convert <input.pdf> [--output <output.epub>] [--dpi <dpi>]");
-    Console.WriteLine("  epubfabric analyze <input.pdf> --project <book.efproj> [--dpi <dpi>]");
+    Console.WriteLine("  epubfabric convert <input.pdf> [--output <output.epub>] [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
+    Console.WriteLine("  epubfabric analyze <input.pdf> --project <book.efproj> [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric export <book.efproj> --format epub [--output <output.epub>]");
+    Console.WriteLine();
+    Console.WriteLine("  --ollama を指定すると、Ollamaによる意味分類（見出し・本文などの補正）を行います（既定では無効）。");
+    Console.WriteLine("  --ollama-model の既定値: gemma4:12b / --ollama-endpoint の既定値: http://localhost:11434");
 }
+
+sealed record OllamaOptions(bool Enabled, string Endpoint, string Model);
