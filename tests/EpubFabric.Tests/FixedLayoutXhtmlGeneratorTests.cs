@@ -48,6 +48,31 @@ public sealed class FixedLayoutXhtmlGeneratorTests
         Assert.DoesNotContain("transform:scaleX", xhtml);
     }
 
+    [Fact]
+    public void GeneratePage_VerticalPageWithPortraitBlock_UsesVerticalWritingModeAndScaleY()
+    {
+        var page = CreatePage(CreateBlock("p0001-b0001", new BoundingBox(0.8, 0.1, 0.03, 0.5), "縦書きの本文行がここにある"));
+        page.WritingMode = WritingMode.Vertical;
+
+        var xhtml = new FixedLayoutXhtmlGenerator().GeneratePage(page, "page-0001.png", "ja").ToString();
+
+        Assert.Contains("writing-mode:vertical-rl", xhtml);
+        Assert.Contains("transform:scaleY(", xhtml);
+        Assert.DoesNotContain("transform:scaleX(", xhtml);
+    }
+
+    [Fact]
+    public void GeneratePage_VerticalPageWithLandscapeBlock_KeepsHorizontalRendering()
+    {
+        // 縦書きページでもキャプション・ノンブル等の横長ブロックは横書きのまま描画する。
+        var page = CreatePage(CreateBlock("p0001-b0001", new BoundingBox(0.1, 0.9, 0.4, 0.03), "横書きのキャプション行です"));
+        page.WritingMode = WritingMode.Vertical;
+
+        var xhtml = new FixedLayoutXhtmlGenerator().GeneratePage(page, "page-0001.png", "ja").ToString();
+
+        Assert.DoesNotContain("writing-mode:vertical-rl", xhtml);
+    }
+
     private static double ExtractScaleX(string xhtml)
     {
         var match = System.Text.RegularExpressions.Regex.Match(xhtml, @"transform:scaleX\(([\d.]+)\)");

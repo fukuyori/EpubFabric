@@ -40,7 +40,7 @@ public sealed class FixedLayoutXhtmlGenerator
                 continue;
             }
 
-            textLayer.Add(CreatePositionedText(block, text, pageWidth, pageHeight));
+            textLayer.Add(CreatePositionedText(block, text, pageWidth, pageHeight, page.WritingMode));
         }
 
         var pageContainer = new XElement(
@@ -74,13 +74,17 @@ public sealed class FixedLayoutXhtmlGenerator
         return new XDocument(new XDeclaration("1.0", "UTF-8", null), html);
     }
 
-    private static XElement CreatePositionedText(PageBlock block, string text, int pageWidth, int pageHeight)
+    private static XElement CreatePositionedText(PageBlock block, string text, int pageWidth, int pageHeight, WritingMode writingMode)
     {
         var left = ClampRatio(block.Bounds.X) * pageWidth;
         var top = ClampRatio(block.Bounds.Y) * pageHeight;
         var width = Math.Max(1, ClampRatio(block.Bounds.Width) * pageWidth);
         var height = Math.Max(1, ClampRatio(block.Bounds.Height) * pageHeight);
-        var fontSize = Math.Max(1, height * 0.85);
+
+        // 縦書きページでも、キャプション・ノンブル等の横書き行が混在するため、
+        // ブロック単位に縦長（高さが幅の1.5倍超）かどうかで縦書き描画を決める。
+        var isVerticalLine = writingMode == WritingMode.Vertical && height > width * 1.5;
+        var fontSize = Math.Max(1, (isVerticalLine ? width : height) * 0.85);
 
         var styleParts = new List<string>
         {
@@ -91,17 +95,25 @@ public sealed class FixedLayoutXhtmlGenerator
             $"font-size:{Number(fontSize)}px",
         };
 
-        // グリフ列の描画幅はリーダーのフォント次第で「文字数×font-size」前後になり、
-        // 紙面上の実際の行幅とずれる（行の後半ほど選択・検索ハイライトが右へはみ出す）。
-        // OCRmyPDFのTz（水平スケール）と同じ発想で、推定自然幅→枠幅のscaleXを掛けて
-        // 行の先頭と末尾の両方を紙面に合わせる。
-        var naturalWidth = EstimateNaturalTextWidth(text) * fontSize;
-        if (naturalWidth > 0)
+        if (isVerticalLine)
         {
-            var scaleX = Math.Clamp(width / naturalWidth, 0.5, 2.0);
-            if (Math.Abs(scaleX - 1.0) > 0.02)
+            styleParts.Add("writing-mode:vertical-rl");
+        }
+
+        // グリフ列の描画長はリーダーのフォント次第で「文字数×font-size」前後になり、
+        // 紙面上の実際の行の長さとずれる（行の後半ほど選択・検索ハイライトがはみ出す）。
+        // OCRmyPDFのTz（水平スケール）と同じ発想で、推定自然長→枠長のスケールを掛けて
+        // 行の先頭と末尾の両方を紙面に合わせる。縦書き行は行方向が縦なのでscaleYを使う。
+        var naturalLength = EstimateNaturalTextWidth(text) * fontSize;
+        if (naturalLength > 0)
+        {
+            var boxLength = isVerticalLine ? height : width;
+            var scale = Math.Clamp(boxLength / naturalLength, 0.5, 2.0);
+            if (Math.Abs(scale - 1.0) > 0.02)
             {
-                styleParts.Add($"transform:scaleX({Number(scaleX)})");
+                styleParts.Add(isVerticalLine
+                    ? $"transform:scaleY({Number(scale)})"
+                    : $"transform:scaleX({Number(scale)})");
             }
         }
 

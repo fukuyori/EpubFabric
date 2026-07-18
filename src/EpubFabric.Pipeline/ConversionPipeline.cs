@@ -291,7 +291,10 @@ public sealed class ConversionPipeline
         // リフロー型ではレイアウト解析と段落統合を適用し、図ブロックの画像を切り出す。
         List<PageBlock> BuildTextBlocks(int pageNumber, string imagePath, IReadOnlyList<TextLine> lines) =>
             options.PreserveAllTextLines
-                ? textLayerBlockBuilder.Build(pageNumber, lines)
+                ? textLayerBlockBuilder.Build(
+                    pageNumber,
+                    lines,
+                    options.VerticalWriting ? WritingMode.Vertical : WritingMode.Horizontal)
                 : AnalyzeLayout(pageNumber, imagePath, lines);
 
         List<PageBlock> AnalyzeLayout(int pageNumber, string imagePath, IReadOnlyList<TextLine> lines)

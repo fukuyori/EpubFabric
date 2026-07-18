@@ -52,6 +52,27 @@ public class TextLayerBlockBuilderTests
     }
 
     [Fact]
+    public void Build_VerticalWriting_OrdersRightToLeftWithinBandsTopToBottom()
+    {
+        // 縦書き2段（上下の帯）× 各3行。読み順は上の帯から、帯内は右の行から左へ。
+        var lines = new[]
+        {
+            new TextLine(new BoundingBox(0.30, 0.10, 0.03, 0.25), "上左", 0.9, TextSourceKind.Ocr),
+            new TextLine(new BoundingBox(0.70, 0.10, 0.03, 0.25), "上右", 0.9, TextSourceKind.Ocr),
+            new TextLine(new BoundingBox(0.50, 0.10, 0.03, 0.25), "上中", 0.9, TextSourceKind.Ocr),
+            new TextLine(new BoundingBox(0.70, 0.50, 0.03, 0.25), "下右", 0.9, TextSourceKind.Ocr),
+            new TextLine(new BoundingBox(0.30, 0.50, 0.03, 0.25), "下左", 0.9, TextSourceKind.Ocr),
+            new TextLine(new BoundingBox(0.50, 0.50, 0.03, 0.25), "下中", 0.9, TextSourceKind.Ocr),
+        };
+
+        var blocks = new TextLayerBlockBuilder().Build(1, lines, WritingMode.Vertical);
+
+        Assert.Equal(
+            ["上右", "上中", "上左", "下右", "下中", "下左"],
+            blocks.OrderBy(b => b.ReadingOrder).Select(b => b.OcrText));
+    }
+
+    [Fact]
     public void Build_DropsOnlyEmptyLines()
     {
         var lines = new[]

@@ -95,7 +95,7 @@ dotnet run --project src\EpubFabric.Cli -- export book.efproj --format epub
 | `--layout <fixed\|reflow>` | `fixed` | 出力レイアウト |
 | `--dpi <dpi>` | `300` | ページラスタライズ解像度 |
 | `--enhance` | 無効 | スキャン紙面の高品質化（紙色正規化・裏写り抑制） |
-| `--vertical` | 無効 | 縦書き（右綴じ）として出力（ページ送りが右→左になる） |
+| `--vertical` | 無効 | 縦書き（右綴じ）として出力。ページ送りが右→左になり、読み順は右の行から左へ、透明テキスト層も縦書き描画になる |
 | `--image-quality <1-100>` | `85` | ページ画像のJPEG品質（固定レイアウト） |
 | `--max-image-size <px>` | `2200` | ページ画像の長辺上限。`0`で縮小なし |
 | `--ollama` | 無効 | Ollamaによる意味分類とOCR校正 |
