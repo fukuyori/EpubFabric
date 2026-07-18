@@ -33,6 +33,7 @@ public sealed class FigureImageExtractor
             Directory.CreateDirectory(directory);
         }
 
-        Cv2.ImWrite(outputPath, cropped);
+        // 出力形式は拡張子で決まる。JPEGの場合の品質は図版の可読性を優先して高めにする。
+        Cv2.ImWrite(outputPath, cropped, new ImageEncodingParam(ImwriteFlags.JpegQuality, 90));
     }
 }

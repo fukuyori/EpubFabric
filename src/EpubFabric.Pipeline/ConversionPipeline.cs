@@ -337,7 +337,8 @@ public sealed class ConversionPipeline
 
             foreach (var figureBlock in blocks.Where(b => b.Type == BlockType.Figure))
             {
-                var figureImagePath = Path.Combine(workDirectory, $"{figureBlock.Id}.png");
+                // 図版はJPEGで抽出する（無圧縮PNGはリフローEPUBを不必要に大きくする）。
+                var figureImagePath = Path.Combine(workDirectory, $"{figureBlock.Id}.jpg");
                 figureExtractor.Extract(imagePath, figureBlock.Bounds, figureImagePath);
                 figureBlock.ExtractedImagePath = figureImagePath;
             }

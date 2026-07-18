@@ -51,6 +51,42 @@ public sealed class OcrLineFilterTests
     }
 
     [Fact]
+    public void 中間帯の長い数字列は網点ゴミとして破棄される()
+    {
+        // 実データ（科学202601）で網点模様が「05630900060000009000960000000009」のような
+        // 数字列として誤認識された。数字はWordCharRatioを通過するため専用ルールで弾く。
+        var filter = new OcrLineFilter();
+        var result = filter.Filter([OcrLine("05630900060000009000960000000009", 0.75)]);
+
+        Assert.Empty(result.Lines);
+        Assert.Equal(1, result.DroppedCount);
+    }
+
+    [Fact]
+    public void 区切りを含む数値やISBNは残る()
+    {
+        var filter = new OcrLineFilter();
+        var result = filter.Filter([
+            OcrLine("ISBN:978-4-8079-2002-0", 0.75),
+            OcrLine("TEL:03-3946-5311 〒112-0011", 0.75),
+            OcrLine("2023年7月時点の情報です。", 0.75),
+        ]);
+
+        Assert.Equal(3, result.Lines.Count);
+        Assert.Equal(0, result.DroppedCount);
+    }
+
+    [Fact]
+    public void 高信頼なら長い数字列でも残る()
+    {
+        // 本物の数表・シリアル番号を高信頼で読めているケースまで消さない。
+        var filter = new OcrLineFilter();
+        var result = filter.Filter([OcrLine("12345678901234567890", 0.95)]);
+
+        Assert.Single(result.Lines);
+    }
+
+    [Fact]
     public void PDFテキスト層由来の行は信頼度にかかわらず残る()
     {
         var filter = new OcrLineFilter();

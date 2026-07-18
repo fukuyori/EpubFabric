@@ -35,6 +35,9 @@ public sealed class OcrLineFilter
         return new OcrLineFilterResult(kept, lines.Count - kept.Count);
     }
 
+    /// <summary>数字ゴミとみなす数字連続列の最小長。ISBNや電話番号は区切り記号を含むため該当しない。</summary>
+    private const int DigitNoiseMinRunLength = 16;
+
     private bool ShouldDrop(CoreTextLine line)
     {
         if (line.Source != TextSourceKind.Ocr)
@@ -47,7 +50,35 @@ public sealed class OcrLineFilter
             return true;
         }
 
-        return line.Confidence < _reviewConfidence && WordCharRatio(line.Text) < _minimumWordCharRatio;
+        if (line.Confidence >= _reviewConfidence)
+        {
+            return false;
+        }
+
+        // 網点・ドット模様が長い数字列として誤認識されるゴミ（例: 05630900060000009000…）。
+        // 数字はWordCharRatioを通過してしまうため、区切りのない長い数字連続列を別途弾く。
+        return WordCharRatio(line.Text) < _minimumWordCharRatio || HasLongDigitRun(line.Text);
+    }
+
+    private static bool HasLongDigitRun(string text)
+    {
+        var run = 0;
+        foreach (var ch in text)
+        {
+            if (char.IsAsciiDigit(ch))
+            {
+                if (++run >= DigitNoiseMinRunLength)
+                {
+                    return true;
+                }
+            }
+            else if (!char.IsWhiteSpace(ch))
+            {
+                run = 0;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>空白を除く文字のうち、単語を構成しうる文字（Letter/Digit、CJK含む）の割合。</summary>
