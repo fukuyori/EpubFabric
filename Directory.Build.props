@@ -1,0 +1,6 @@
+<Project>
+  <!-- 全プロジェクト共通のバージョン。リリース時はここを更新し、同じ番号の git タグ（v0.1.0 形式）を打つ。 -->
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+</Project>

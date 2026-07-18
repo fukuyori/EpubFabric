@@ -10,7 +10,7 @@ PATH 環境変数への追加（任意タスク）とアンインストール時
 Inno Setup 6 のインストールが必要: https://jrsoftware.org/isinfo.php
 
 .PARAMETER Version
-インストーラーのバージョン。既定は 1.0.0。
+インストーラーのバージョン。省略時は Directory.Build.props の <Version> を使う。
 
 .PARAMETER SkipPublish
 publish を省略し、既存の publish 出力からインストーラーだけを作り直す。
@@ -24,7 +24,7 @@ publish 前のテスト実行を省略する。
 #>
 [CmdletBinding()]
 param(
-    [string]$Version = "1.0.0",
+    [string]$Version,
     [switch]$SkipPublish,
     [switch]$SkipTests
 )
@@ -32,6 +32,14 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+
+if (-not $Version) {
+    $props = Join-Path $repoRoot "Directory.Build.props"
+    $Version = ([xml](Get-Content $props)).Project.PropertyGroup.Version
+    if (-not $Version) {
+        throw "バージョンを特定できません。-Version を指定するか Directory.Build.props に <Version> を定義してください。"
+    }
+}
 $publishDirectory = Join-Path $repoRoot "publish\EpubFabric.Cli\win-x64"
 $installerDirectory = Join-Path $repoRoot "publish\installer"
 
