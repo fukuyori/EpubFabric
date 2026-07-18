@@ -7,6 +7,14 @@ public enum OutputLayout
     Reflow,
 }
 
+/// <summary>書字方向の指定。Autoは行の形状からページ単位に自動判定する。</summary>
+public enum WritingModeSetting
+{
+    Auto,
+    Horizontal,
+    Vertical,
+}
+
 /// <summary>Ollama連携の設定。nullなら意味分類・OCR校正を行わない。</summary>
 public sealed record OllamaPipelineOptions(string Endpoint, string Model);
 
@@ -29,8 +37,9 @@ public sealed record ConversionOptions
     /// <summary>ページ画像の高品質化（紙色正規化・裏写り抑制）。</summary>
     public bool EnhancePages { get; init; }
 
-    /// <summary>縦書き（右綴じ）の書籍か。trueで page-progression-direction が rtl になる。</summary>
-    public bool VerticalWriting { get; init; }
+    /// <summary>書字方向。既定のAutoでは、行の縦横比からページ単位に自動判定し、
+    /// 綴じ方向（page-progression-direction）は縦書きページの多数決で決める。</summary>
+    public WritingModeSetting WritingMode { get; init; } = WritingModeSetting.Auto;
 
     public OllamaPipelineOptions? Ollama { get; init; }
 }

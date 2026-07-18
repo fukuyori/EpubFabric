@@ -81,6 +81,7 @@ public sealed class ConversionPipeline
         {
             var pages = new List<DocumentPage>();
             var reviewRequiredCount = 0;
+            var detectedPageModes = new List<WritingMode>();
 
             for (var i = 0; i < info.PageCount; i++)
             {
@@ -118,6 +119,9 @@ public sealed class ConversionPipeline
                 var pageBlocks = new List<PageBlock>();
                 string? fallbackPdfText = null;
                 var requiresOcr = !pageInfo.HasText;
+                var pageWritingMode = options.WritingMode == WritingModeSetting.Vertical
+                    ? WritingMode.Vertical
+                    : WritingMode.Horizontal;
 
                 if (pageInfo.HasText)
                 {
@@ -127,7 +131,9 @@ public sealed class ConversionPipeline
 
                     if (assessment.IsUsable)
                     {
-                        pageBlocks = BuildTextBlocks(pageNumber, displayImagePath, textLines);
+                        pageWritingMode = ResolveWritingMode(textLines);
+                        detectedPageModes.Add(pageWritingMode);
+                        pageBlocks = BuildTextBlocks(pageNumber, displayImagePath, textLines, pageWritingMode);
                     }
                     else
                     {
@@ -180,7 +186,9 @@ public sealed class ConversionPipeline
                             Report(pageNumber, $"  低信頼のOCRゴミ行{ocrResult.DroppedLineCount}件を除外しました。");
                         }
 
-                        pageBlocks = BuildTextBlocks(pageNumber, displayImagePath, ocrLines);
+                        pageWritingMode = ResolveWritingMode(ocrLines);
+                        detectedPageModes.Add(pageWritingMode);
+                        pageBlocks = BuildTextBlocks(pageNumber, displayImagePath, ocrLines, pageWritingMode);
                     }
                     catch (Exception ex) when (ex is OcrModelDownloadException or InvalidOperationException)
                     {
@@ -219,7 +227,7 @@ public sealed class ConversionPipeline
                     PreviewImagePath = displayImagePath,
                     Width = pageInfo.WidthPoints,
                     Height = pageInfo.HeightPoints,
-                    WritingMode = options.VerticalWriting ? WritingMode.Vertical : WritingMode.Horizontal,
+                    WritingMode = pageWritingMode,
                     Status = pageBlocks.Count > 0 ? PageProcessingStatus.OcrCompleted : PageProcessingStatus.Error,
                 };
                 page.Blocks.AddRange(pageBlocks);
@@ -271,12 +279,26 @@ public sealed class ConversionPipeline
             var noTextPageCount = pages.Count(page => page.Blocks.All(block => block.TextSource == TextSourceKind.Unknown));
             Report(info.PageCount, $"文字情報の取得元: PDF {pdfTextPageCount}ページ / OCR {ocrTextPageCount}ページ / 文字なし {noTextPageCount}ページ");
 
+            // 綴じ方向は縦書きページの多数決で決める（強制指定があればそれに従う）。
+            var documentMode = options.WritingMode switch
+            {
+                WritingModeSetting.Vertical => WritingMode.Vertical,
+                WritingModeSetting.Horizontal => WritingMode.Horizontal,
+                _ => WritingModeDetector.DetectDocumentMode(detectedPageModes),
+            };
+
+            if (options.WritingMode == WritingModeSetting.Auto && documentMode == WritingMode.Vertical)
+            {
+                var verticalPages = detectedPageModes.Count(m => m == WritingMode.Vertical);
+                Report(info.PageCount, $"縦書きと判定しました（縦書き{verticalPages}/横書き{detectedPageModes.Count - verticalPages}ページ）。右綴じで出力します。");
+            }
+
             var project = new EpubFabricProject
             {
                 Id = Guid.NewGuid(),
                 Title = Path.GetFileNameWithoutExtension(options.InputPath),
                 SourcePdfPath = options.InputPath,
-                WritingMode = options.VerticalWriting ? WritingMode.Vertical : WritingMode.Horizontal,
+                WritingMode = documentMode,
                 Pages = pages,
             };
 
@@ -287,14 +309,20 @@ public sealed class ConversionPipeline
             ocrService?.Dispose();
         }
 
+        // 書字方向: Autoでは行の縦横比からページ単位に判定する（縦書き誌の中の
+        // 横書き情報ページも正しい読み順になる）。強制指定時はそれに従う。
+        WritingMode ResolveWritingMode(IReadOnlyList<TextLine> lines) => options.WritingMode switch
+        {
+            WritingModeSetting.Vertical => WritingMode.Vertical,
+            WritingModeSetting.Horizontal => WritingMode.Horizontal,
+            _ => WritingModeDetector.DetectPageMode(lines),
+        };
+
         // 固定レイアウトでは全テキスト行を座標付きのまま保持する。
         // リフロー型ではレイアウト解析と段落統合を適用し、図ブロックの画像を切り出す。
-        List<PageBlock> BuildTextBlocks(int pageNumber, string imagePath, IReadOnlyList<TextLine> lines) =>
+        List<PageBlock> BuildTextBlocks(int pageNumber, string imagePath, IReadOnlyList<TextLine> lines, WritingMode writingMode) =>
             options.PreserveAllTextLines
-                ? textLayerBlockBuilder.Build(
-                    pageNumber,
-                    lines,
-                    options.VerticalWriting ? WritingMode.Vertical : WritingMode.Horizontal)
+                ? textLayerBlockBuilder.Build(pageNumber, lines, writingMode)
                 : AnalyzeLayout(pageNumber, imagePath, lines);
 
         List<PageBlock> AnalyzeLayout(int pageNumber, string imagePath, IReadOnlyList<TextLine> lines)
