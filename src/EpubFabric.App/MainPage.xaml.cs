@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using EpubFabric.Core.Models;
 using EpubFabric.Pipeline;
 using Microsoft.UI.Xaml.Controls;
 using Windows.Storage.Pickers;
@@ -19,6 +20,8 @@ public sealed partial class MainPage : Page
     private readonly ObservableCollection<string> _logLines = [];
     private CancellationTokenSource? _cancellation;
     private string? _lastOutputPath;
+    private EpubFabricProject? _lastProject;
+    private OutputLayout _lastLayout;
 
     public MainPage()
     {
@@ -125,18 +128,22 @@ public sealed partial class MainPage : Page
         try
         {
             var token = _cancellation.Token;
-            await Task.Run(
+            var convertedProject = await Task.Run(
                 async () =>
                 {
                     var pipeline = new ConversionPipeline();
                     var (project, _) = await pipeline.BuildProjectAsync(options, progress, token);
                     token.ThrowIfCancellationRequested();
                     pipeline.BuildEpub(project, layout, outputPath);
+                    return project;
                 },
                 token);
 
             _lastOutputPath = outputPath;
+            _lastProject = convertedProject;
+            _lastLayout = layout;
             OpenFolderButton.IsEnabled = true;
+            EditorButton.IsEnabled = true;
             ConvertProgressBar.Value = 100;
             StatusText.Text = $"完了: {outputPath}";
             AppendLog($"EPUBを生成しました: {outputPath}");
@@ -171,6 +178,14 @@ public sealed partial class MainPage : Page
         if (_lastOutputPath is not null && File.Exists(_lastOutputPath))
         {
             Process.Start("explorer.exe", $"/select,\"{_lastOutputPath}\"");
+        }
+    }
+
+    private void OnOpenEditorClick(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    {
+        if (_lastProject is not null)
+        {
+            Frame.Navigate(typeof(EditorPage), new EditorNavigationArgs(_lastProject, _lastLayout));
         }
     }
 

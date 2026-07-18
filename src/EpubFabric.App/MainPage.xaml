@@ -63,6 +63,7 @@
             <Button x:Name="ConvertButton" Content="変換開始" Style="{StaticResource AccentButtonStyle}" Click="OnConvertClick" IsEnabled="False" />
             <Button x:Name="CancelButton" Content="キャンセル" Click="OnCancelClick" IsEnabled="False" />
             <Button x:Name="OpenFolderButton" Content="出力フォルダを開く" Click="OnOpenFolderClick" IsEnabled="False" />
+            <Button x:Name="EditorButton" Content="校正画面を開く" Click="OnOpenEditorClick" IsEnabled="False" />
         </StackPanel>
 
         <!-- 進捗 -->

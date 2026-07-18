@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="EpubFabric_App.EditorPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:EpubFabric_App"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid Padding="12" RowSpacing="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- コマンドバー -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8">
+            <Button x:Name="BackButton" Content="← 変換画面へ" Click="OnBackClick" />
+            <TextBlock x:Name="TitleText" VerticalAlignment="Center" Style="{StaticResource SubtitleTextBlockStyle}" />
+            <Button x:Name="ExportButton" Content="EPUBを書き出す" Style="{StaticResource AccentButtonStyle}" Click="OnExportClick" />
+            <TextBlock x:Name="StatusText" VerticalAlignment="Center" Style="{StaticResource CaptionTextBlockStyle}" />
+        </StackPanel>
+
+        <Grid Grid.Row="1" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="150" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="340" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 左: ページ一覧 -->
+            <ListView x:Name="PageList" Grid.Column="0" SelectionChanged="OnPageSelected"
+                      BorderThickness="1" CornerRadius="4"
+                      BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" />
+
+            <!-- 中央: ページ画像 + ブロック枠オーバーレイ -->
+            <ScrollViewer Grid.Column="1" ZoomMode="Enabled" MinZoomFactor="0.2" MaxZoomFactor="4"
+                          HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                          BorderThickness="1" CornerRadius="4"
+                          BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                <Viewbox x:Name="PageViewbox" Stretch="Uniform" StretchDirection="Both">
+                    <Grid x:Name="PageCanvasHost">
+                        <Image x:Name="PageImage" Stretch="Fill" />
+                        <Canvas x:Name="OverlayCanvas" />
+                    </Grid>
+                </Viewbox>
+            </ScrollViewer>
+
+            <!-- 右: ブロック情報 -->
+            <ScrollViewer Grid.Column="2">
+                <StackPanel x:Name="BlockPanel" Spacing="8" Visibility="Collapsed">
+                    <TextBlock Text="選択ブロック" Style="{StaticResource SubtitleTextBlockStyle}" />
+                    <TextBlock x:Name="BlockIdText" Style="{StaticResource CaptionTextBlockStyle}" />
+                    <TextBlock x:Name="BlockMetaText" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap" />
+
+                    <ComboBox x:Name="BlockTypeCombo" Header="種別" MinWidth="200" SelectionChanged="OnBlockTypeChanged" />
+                    <NumberBox x:Name="HeadingLevelBox" Header="見出しレベル（0=なし）" Minimum="0" Maximum="6"
+                               SpinButtonPlacementMode="Compact" ValueChanged="OnHeadingLevelChanged" />
+                    <CheckBox x:Name="ExcludedCheck" Content="EPUBへ収録しない（除外）"
+                              Checked="OnExcludedChanged" Unchecked="OnExcludedChanged" />
+
+                    <TextBox x:Name="BlockTextBox" Header="テキスト（修正するとEPUBへ反映）"
+                             AcceptsReturn="True" TextWrapping="Wrap" MinHeight="160" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button x:Name="ApplyTextButton" Content="テキスト修正を適用" Click="OnApplyTextClick" />
+                        <Button x:Name="RevertTextButton" Content="OCR結果に戻す" Click="OnRevertTextClick" />
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
+</Page>
