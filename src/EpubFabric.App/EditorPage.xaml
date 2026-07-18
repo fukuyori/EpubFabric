@@ -24,15 +24,24 @@
 
         <Grid Grid.Row="1" ColumnSpacing="12">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="150" />
+                <ColumnDefinition Width="230" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="340" />
             </Grid.ColumnDefinitions>
 
-            <!-- 左: ページ一覧 -->
-            <ListView x:Name="PageList" Grid.Column="0" SelectionChanged="OnPageSelected"
-                      BorderThickness="1" CornerRadius="4"
-                      BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <!-- 左: ページ一覧 + 現在ページのブロック一覧 -->
+            <Grid Grid.Column="0" RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="2*" />
+                    <RowDefinition Height="3*" />
+                </Grid.RowDefinitions>
+                <ListView x:Name="PageList" Grid.Row="0" SelectionChanged="OnPageSelected"
+                          BorderThickness="1" CornerRadius="4"
+                          BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" />
+                <ListView x:Name="BlockList" Grid.Row="1" SelectionChanged="OnBlockListSelected"
+                          BorderThickness="1" CornerRadius="4"
+                          BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" />
+            </Grid>
 
             <!-- 中央: ページ画像 + ブロック枠オーバーレイ -->
             <ScrollViewer Grid.Column="1" ZoomMode="Enabled" MinZoomFactor="0.2" MaxZoomFactor="4"

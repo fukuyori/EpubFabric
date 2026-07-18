@@ -27,6 +27,15 @@ public sealed partial class MainPage : Page
     {
         InitializeComponent();
         LogList.ItemsSource = _logLines;
+
+        // 起動引数でPDFが渡されていれば選択済みの状態で開始する。
+        if (App.StartupPdfPath is { } startupPdf)
+        {
+            InputPathBox.Text = startupPdf;
+            OutputPathBox.Text = Path.ChangeExtension(startupPdf, ".epub");
+            ConvertButton.IsEnabled = true;
+            StatusText.Text = "変換を開始できます。";
+        }
     }
 
     private async void OnPickInputClick(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)

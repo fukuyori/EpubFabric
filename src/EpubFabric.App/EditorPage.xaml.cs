@@ -84,6 +84,32 @@ public sealed partial class EditorPage : Page
         _selectedRectangle = null;
         BlockPanel.Visibility = Visibility.Collapsed;
         LoadPage(_currentPage);
+
+        // ブロック一覧（小さなブロックはマウスで狙いにくいため、一覧からも選択できるようにする）
+        BlockList.ItemsSource = _currentPage.Blocks
+            .OrderBy(b => b.ReadingOrder)
+            .Select(b =>
+            {
+                var text = (b.CorrectedText ?? b.OcrText).Replace('\n', ' ');
+                if (text.Length > 14)
+                {
+                    text = text[..14] + "…";
+                }
+                return $"{b.ReadingOrder}: {text}";
+            })
+            .ToList();
+    }
+
+    private void OnBlockListSelected(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingPanel || _currentPage is null || BlockList.SelectedIndex < 0)
+        {
+            return;
+        }
+
+        var block = _currentPage.Blocks.OrderBy(b => b.ReadingOrder).ElementAt(BlockList.SelectedIndex);
+        var rectangle = OverlayCanvas.Children.OfType<Rectangle>().FirstOrDefault(r => ReferenceEquals(r.Tag, block));
+        SelectBlock(block, rectangle);
     }
 
     private void LoadPage(DocumentPage page)
@@ -123,16 +149,38 @@ public sealed partial class EditorPage : Page
             return;
         }
 
+        SelectBlock(block, rect);
+
+        // ブロック一覧の選択も同期する（SelectionChangedの再入はSelectBlock内の状態で抑止済み）。
+        if (_currentPage is not null)
+        {
+            var index = _currentPage.Blocks.OrderBy(b => b.ReadingOrder).ToList().IndexOf(block);
+            if (index >= 0 && BlockList.SelectedIndex != index)
+            {
+                _updatingPanel = true;
+                BlockList.SelectedIndex = index;
+                _updatingPanel = false;
+            }
+        }
+
+        e.Handled = true;
+    }
+
+    private void SelectBlock(PageBlock block, Rectangle? rectangle)
+    {
         if (_selectedRectangle is not null)
         {
             _selectedRectangle.StrokeThickness = 1.2;
         }
 
-        _selectedRectangle = rect;
-        rect.StrokeThickness = 3.5;
+        _selectedRectangle = rectangle;
+        if (rectangle is not null)
+        {
+            rectangle.StrokeThickness = 3.5;
+        }
+
         _selectedBlock = block;
         ShowBlock(block);
-        e.Handled = true;
     }
 
     private void ShowBlock(PageBlock block)
