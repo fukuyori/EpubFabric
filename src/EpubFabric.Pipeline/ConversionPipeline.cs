@@ -33,6 +33,7 @@ public sealed class ConversionPipeline
         var regionDetector = new NonTextRegionDetector();
         var figureExtractor = new FigureImageExtractor();
         var ocrPreprocessor = new OcrImagePreprocessor();
+        var inkDensityMeasurer = new LineInkDensityMeasurer();
         var pageEnhancer = options.EnhancePages ? new PageImageEnhancer() : null;
         var info = pdfService.GetInfo(options.InputPath);
 
@@ -327,6 +328,9 @@ public sealed class ConversionPipeline
 
         List<PageBlock> AnalyzeLayout(int pageNumber, string imagePath, IReadOnlyList<TextLine> lines)
         {
+            // 太字見出し検出用に行のインク密度を測る（高さが本文と同じゴシック見出し対策）。
+            lines = inkDensityMeasurer.Measure(imagePath, lines);
+
             var textBounds = lines.Select(l => l.Bounds).ToList();
             var regions = regionDetector.DetectRegions(imagePath, textBounds);
             var blocks = paragraphMerger.Merge(layoutAnalyzer.AnalyzePage(pageNumber, lines, regions));

@@ -17,6 +17,16 @@ public sealed class HeuristicLayoutAnalyzer
     private const double SectionHeadingRatio = 1.35;
     private const double SubheadingRatio = 1.15;
 
+    /// <summary>本文中央値に対するインク密度の倍率がこれ以上の短い行は太字見出し（小見出し）とみなす。
+    /// 高さが本文と同じゴシック太字見出しは高さ基準では検出できないため（0b(c)）。</summary>
+    private const double BoldSubheadingDensityRatio = 1.4;
+
+    /// <summary>この倍率を超える密度は太字ではなく罫線・図形が行ボックスに重なった可能性が高いので見出し扱いしない。</summary>
+    private const double BoldSubheadingDensityCeiling = 3.0;
+
+    /// <summary>太字見出し候補の最小文字数（空白除く）。句読点だけの断片行を除外する。</summary>
+    private const int BoldSubheadingMinLength = 4;
+
     private const double MarginBand = 0.06; // 上下6%を柱・ノンブルの候補域とする。
     private const int RunningTextMaxLength = 30;
     private const double MaxCaptionGap = 0.03; // 図の下端からキャプション候補行までの最大距離。
@@ -27,23 +37,42 @@ public sealed class HeuristicLayoutAnalyzer
         IReadOnlyList<NonTextRegion>? regions = null)
     {
         regions ??= [];
-        var figureRegions = regions.Where(r => r.Kind == NonTextRegionKind.Figure).ToList();
         var boxedRegions = regions.Where(r => r.Kind == NonTextRegionKind.Boxed).ToList();
 
-        // 図の内部にあるOCR行（図中のラベル等）は、切り出した図画像に既に含まれているため、
-        // 別の本文段落として重複させない。
-        var effectiveLines = lines.Where(l => !figureRegions.Any(f => OverlapsSignificantly(l.Bounds, f.Bounds))).ToList();
+        // 図として検出された領域でも、内部がテキスト行で覆われていてコード的な内容なら
+        // 画像化せずCodeブロックとしてテキストを保持する（0b(a): 罫線囲みのコード例対策）。
+        var figureRegions = new List<NonTextRegion>();
+        var codeRegions = new List<(NonTextRegion Region, List<TextLine> Lines)>();
+        foreach (var region in regions.Where(r => r.Kind == NonTextRegionKind.Figure))
+        {
+            var contained = lines.Where(l => OverlapsSignificantly(l.Bounds, region.Bounds)).ToList();
+            if (IsCodeRegion(region, contained))
+            {
+                codeRegions.Add((region, contained));
+            }
+            else
+            {
+                figureRegions.Add(region);
+            }
+        }
 
-        if (effectiveLines.Count == 0 && figureRegions.Count == 0)
+        // 図・コード枠の内部にあるOCR行は、図画像またはCodeブロックに含まれるため、
+        // 別の本文段落として重複させない。
+        var consumedRegions = figureRegions.Concat(codeRegions.Select(c => c.Region)).ToList();
+        var effectiveLines = lines.Where(l => !consumedRegions.Any(f => OverlapsSignificantly(l.Bounds, f.Bounds))).ToList();
+
+        if (effectiveLines.Count == 0 && figureRegions.Count == 0 && codeRegions.Count == 0)
         {
             return [];
         }
 
         var bodyHeight = effectiveLines.Count > 0 ? EstimateBodyLineHeight(effectiveLines) : 0;
+        var bodyInkDensity = EstimateBodyInkDensity(effectiveLines);
 
-        var items = new List<PositionedItem>(effectiveLines.Count + figureRegions.Count);
-        items.AddRange(effectiveLines.Select(l => new PositionedItem(l.Bounds, l, null)));
-        items.AddRange(figureRegions.Select(r => new PositionedItem(r.Bounds, null, r)));
+        var items = new List<PositionedItem>(effectiveLines.Count + figureRegions.Count + codeRegions.Count);
+        items.AddRange(effectiveLines.Select(l => new PositionedItem(l.Bounds, l, null, null)));
+        items.AddRange(figureRegions.Select(r => new PositionedItem(r.Bounds, null, r, null)));
+        items.AddRange(codeRegions.Select(c => new PositionedItem(c.Region.Bounds, null, c.Region, c.Lines)));
 
         var columns = ColumnDetector.DetectColumns(items, i => i.Bounds);
 
@@ -55,9 +84,14 @@ public sealed class HeuristicLayoutAnalyzer
         {
             foreach (var item in column.OrderBy(i => i.Bounds.Y))
             {
-                var block = item.Region is { } figureRegion
-                    ? CreateFigureBlock(pageNumber, blocks.Count + 1, figureRegion, readingOrder++)
-                    : CreateTextBlock(pageNumber, blocks.Count + 1, item.Line!, bodyHeight, boxedRegions, readingOrder++);
+                var block = item switch
+                {
+                    { CodeLines: { } codeLines, Region: { } codeRegion } =>
+                        CreateCodeBlock(pageNumber, blocks.Count + 1, codeRegion, codeLines, readingOrder++),
+                    { Region: { } figureRegion } =>
+                        CreateFigureBlock(pageNumber, blocks.Count + 1, figureRegion, readingOrder++),
+                    _ => CreateTextBlock(pageNumber, blocks.Count + 1, item.Line!, bodyHeight, bodyInkDensity, boxedRegions, readingOrder++),
+                };
 
                 if (block.Type == BlockType.Figure)
                 {
@@ -83,11 +117,72 @@ public sealed class HeuristicLayoutAnalyzer
         ReadingOrder = readingOrder,
     };
 
+    /// <summary>コード枠内の行を改行区切りで1つのCodeブロックにまとめる（&lt;pre&gt;で行構造を保つ）。</summary>
+    private static PageBlock CreateCodeBlock(
+        int pageNumber, int blockIndex, NonTextRegion region, IReadOnlyList<TextLine> codeLines, int readingOrder) => new()
+    {
+        Id = $"p{pageNumber:0000}-b{blockIndex:0000}",
+        PageNumber = pageNumber,
+        Bounds = region.Bounds,
+        Type = BlockType.Code,
+        OcrText = string.Join("\n", codeLines.OrderBy(l => l.Bounds.Y).ThenBy(l => l.Bounds.X).Select(l => l.Text)),
+        OcrConfidence = codeLines.Count > 0 ? codeLines.Min(l => l.Confidence) : 0,
+        TextSource = codeLines.Count > 0 ? codeLines[0].Source : TextSourceKind.Unknown,
+        ReadingOrder = readingOrder,
+    };
+
+    /// <summary>
+    /// 図として検出された領域が「罫線囲みのコード例」かを判定する。条件は、
+    /// (1) 複数のテキスト行を含む、(2) 行が領域面積の一定割合以上を覆う（写真・図解は
+    /// ラベルが数個で被覆率が低い）、(3) 内容にASCIIのコード記号が一定割合含まれる。
+    /// </summary>
+    private static bool IsCodeRegion(NonTextRegion region, IReadOnlyList<TextLine> containedLines)
+    {
+        const double minTextCoverage = 0.25;
+        const double minCodeSymbolRatio = 0.05;
+
+        if (containedLines.Count < 2)
+        {
+            return false;
+        }
+
+        var regionArea = region.Bounds.Width * region.Bounds.Height;
+        if (regionArea <= 0)
+        {
+            return false;
+        }
+
+        var textArea = containedLines.Sum(l => l.Bounds.Width * l.Bounds.Height);
+        if (textArea / regionArea < minTextCoverage)
+        {
+            return false;
+        }
+
+        var nonSpace = 0;
+        var codeSymbols = 0;
+        foreach (var ch in containedLines.SelectMany(l => l.Text))
+        {
+            if (char.IsWhiteSpace(ch))
+            {
+                continue;
+            }
+
+            nonSpace++;
+            if (ch is '(' or ')' or '{' or '}' or '[' or ']' or ';' or '=' or '<' or '>'
+                or '$' or '#' or '&' or '|' or '\\' or '/' or '*' or '+' or '\'' or '"' or '`' or '_')
+            {
+                codeSymbols++;
+            }
+        }
+
+        return nonSpace > 0 && (double)codeSymbols / nonSpace >= minCodeSymbolRatio;
+    }
+
     private static PageBlock CreateTextBlock(
-        int pageNumber, int blockIndex, TextLine line, double bodyHeight, IReadOnlyList<NonTextRegion> boxedRegions, int readingOrder)
+        int pageNumber, int blockIndex, TextLine line, double bodyHeight, double? bodyInkDensity, IReadOnlyList<NonTextRegion> boxedRegions, int readingOrder)
     {
         var isBoxed = boxedRegions.Any(b => OverlapsSignificantly(line.Bounds, b.Bounds));
-        var type = isBoxed ? BlockType.Aside : ClassifyLine(line, bodyHeight);
+        var type = isBoxed ? BlockType.Aside : ClassifyLine(line, bodyHeight, bodyInkDensity);
         var isExcluded = type is BlockType.Header or BlockType.Footer or BlockType.PageNumber;
 
         return new PageBlock
@@ -158,7 +253,7 @@ public sealed class HeuristicLayoutAnalyzer
         return heights[heights.Count / 2];
     }
 
-    private static BlockType ClassifyLine(TextLine line, double bodyHeight)
+    private static BlockType ClassifyLine(TextLine line, double bodyHeight, double? bodyInkDensity)
     {
         var isNearTopMargin = line.Bounds.Y < MarginBand;
         var isNearBottomMargin = line.Bounds.Y + line.Bounds.Height > 1 - MarginBand;
@@ -181,13 +276,46 @@ public sealed class HeuristicLayoutAnalyzer
 
         var ratio = bodyHeight > 0 ? line.Bounds.Height / bodyHeight : 1.0;
 
-        return ratio switch
+        var byHeight = ratio switch
         {
             >= ChapterTitleRatio => BlockType.ChapterTitle,
             >= SectionHeadingRatio => BlockType.SectionHeading,
             >= SubheadingRatio => BlockType.Subheading,
             _ => BlockType.Body,
         };
+
+        // 高さが本文並みでも、本文より明確にインクが濃い短い行はゴシック太字の見出しと
+        // みなす（高さ基準では検出できない 0b(c) のケース）。密度が高すぎる行は
+        // 罫線・図形が行ボックスへ重なった可能性が高いため除外する。
+        var trimmedLength = line.Text.Count(c => !char.IsWhiteSpace(c));
+        if (byHeight == BlockType.Body
+            && isShort
+            && trimmedLength >= BoldSubheadingMinLength
+            && line.InkDensity is { } density
+            && bodyInkDensity is { } bodyDensity
+            && bodyDensity > 0
+            && density >= bodyDensity * BoldSubheadingDensityRatio
+            && density < bodyDensity * BoldSubheadingDensityCeiling)
+        {
+            return BlockType.Subheading;
+        }
+
+        return byHeight;
+    }
+
+    /// <summary>
+    /// 本文のインク密度を中央値で推定する。見出し・図中ラベルの影響を受けにくくするため、
+    /// 密度が測定済みの行だけを対象にする。測定行が少なければnull（太字判定を行わない）。
+    /// </summary>
+    private static double? EstimateBodyInkDensity(IReadOnlyList<TextLine> lines)
+    {
+        var densities = lines
+            .Where(l => l.InkDensity is not null)
+            .Select(l => l.InkDensity!.Value)
+            .OrderBy(d => d)
+            .ToList();
+
+        return densities.Count >= 5 ? densities[densities.Count / 2] : null;
     }
 
     private static int? HeadingLevelFor(BlockType type) => type switch
@@ -208,5 +336,6 @@ public sealed class HeuristicLayoutAnalyzer
         return lineArea > 0 && overlapArea / lineArea > 0.5;
     }
 
-    private readonly record struct PositionedItem(BoundingBox Bounds, TextLine? Line, NonTextRegion? Region);
+    private readonly record struct PositionedItem(
+        BoundingBox Bounds, TextLine? Line, NonTextRegion? Region, IReadOnlyList<TextLine>? CodeLines);
 }

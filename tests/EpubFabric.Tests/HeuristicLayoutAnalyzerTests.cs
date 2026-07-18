@@ -50,6 +50,89 @@ public class HeuristicLayoutAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzePage_FigureRegionCoveredByCodeLines_BecomesCodeBlockKeepingText()
+    {
+        // 罫線囲みのコード例: 図として検出されても、テキスト行の被覆率が高くコード記号を
+        // 含むならCodeブロックとしてテキストを保持する（0b(a)）。
+        var lines = new List<TextLine>
+        {
+            new(new BoundingBox(0.12, 0.12, 0.6, 0.04), "awk '{ print $1 }' data.txt", 0.9),
+            new(new BoundingBox(0.12, 0.17, 0.6, 0.04), "awk -F: '{ sum += $3 } END { print sum }'", 0.9),
+            new(new BoundingBox(0.10, 0.40, 0.7, 0.03), "本文の一行目がここにあります。", 0.9),
+        };
+        var regions = new List<NonTextRegion>
+        {
+            new(new BoundingBox(0.10, 0.10, 0.65, 0.13), NonTextRegionKind.Figure),
+        };
+
+        var blocks = _analyzer.AnalyzePage(pageNumber: 1, lines, regions);
+
+        var codeBlock = Assert.Single(blocks, b => b.Type == BlockType.Code);
+        Assert.Contains("awk '{ print $1 }' data.txt", codeBlock.OcrText);
+        Assert.Contains("\n", codeBlock.OcrText);
+        Assert.DoesNotContain(blocks, b => b.Type == BlockType.Figure);
+    }
+
+    [Fact]
+    public void AnalyzePage_FigureRegionWithSparseLabels_StaysFigure()
+    {
+        // 写真・図解: ラベルが少なく被覆率が低い領域は従来どおりFigure（ラベル行は破棄）。
+        var lines = new List<TextLine>
+        {
+            new(new BoundingBox(0.30, 0.25, 0.08, 0.02), "図中ラベル", 0.9),
+            new(new BoundingBox(0.10, 0.60, 0.7, 0.03), "本文の一行目がここにあります。", 0.9),
+        };
+        var regions = new List<NonTextRegion>
+        {
+            new(new BoundingBox(0.10, 0.10, 0.65, 0.40), NonTextRegionKind.Figure),
+        };
+
+        var blocks = _analyzer.AnalyzePage(pageNumber: 1, lines, regions);
+
+        Assert.Single(blocks, b => b.Type == BlockType.Figure);
+        Assert.DoesNotContain(blocks, b => b.Type == BlockType.Code);
+        Assert.DoesNotContain(blocks, b => b.OcrText == "図中ラベル");
+    }
+
+    [Fact]
+    public void AnalyzePage_BoldShortLineWithBodyHeight_IsClassifiedAsSubheading()
+    {
+        // 高さは本文と同じだがインク密度が明確に高い短行 = ゴシック太字見出し（0b(c)）。
+        var lines = new List<TextLine>
+        {
+            new(new BoundingBox(0.1, 0.10, 0.3, 0.03), "太字の見出し", 0.9, TextSourceKind.Ocr, InkDensity: 0.30),
+            new(new BoundingBox(0.1, 0.15, 0.7, 0.03), "本文の一行目がここにあります。", 0.9, TextSourceKind.Ocr, InkDensity: 0.15),
+            new(new BoundingBox(0.1, 0.19, 0.7, 0.03), "本文の二行目がここにあります。", 0.9, TextSourceKind.Ocr, InkDensity: 0.16),
+            new(new BoundingBox(0.1, 0.23, 0.7, 0.03), "本文の三行目がここにあります。", 0.9, TextSourceKind.Ocr, InkDensity: 0.14),
+            new(new BoundingBox(0.1, 0.27, 0.7, 0.03), "本文の四行目がここにあります。", 0.9, TextSourceKind.Ocr, InkDensity: 0.15),
+            new(new BoundingBox(0.1, 0.31, 0.7, 0.03), "本文の五行目がここにあります。", 0.9, TextSourceKind.Ocr, InkDensity: 0.16),
+        };
+
+        var blocks = _analyzer.AnalyzePage(pageNumber: 1, lines);
+
+        Assert.Equal(BlockType.Subheading, blocks.Single(b => b.OcrText == "太字の見出し").Type);
+        Assert.All(blocks.Where(b => b.OcrText != "太字の見出し"), b => Assert.Equal(BlockType.Body, b.Type));
+    }
+
+    [Fact]
+    public void AnalyzePage_DensityNotMeasured_KeepsHeightBasedClassificationOnly()
+    {
+        // InkDensity未測定（null）の行しかない場合は、太字判定を行わず従来どおり。
+        var lines = new List<TextLine>
+        {
+            new(new BoundingBox(0.1, 0.10, 0.3, 0.03), "短い行", 0.9),
+            new(new BoundingBox(0.1, 0.15, 0.7, 0.03), "本文の一行目がここにあります。", 0.9),
+            new(new BoundingBox(0.1, 0.19, 0.7, 0.03), "本文の二行目がここにあります。", 0.9),
+            new(new BoundingBox(0.1, 0.23, 0.7, 0.03), "本文の三行目がここにあります。", 0.9),
+            new(new BoundingBox(0.1, 0.27, 0.7, 0.03), "本文の四行目がここにあります。", 0.9),
+        };
+
+        var blocks = _analyzer.AnalyzePage(pageNumber: 1, lines);
+
+        Assert.All(blocks, b => Assert.Equal(BlockType.Body, b.Type));
+    }
+
+    [Fact]
     public void AnalyzePage_ShortLineNearBottomAllDigits_IsClassifiedAsPageNumberAndExcluded()
     {
         var lines = new List<TextLine>
