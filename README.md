@@ -46,6 +46,17 @@ dotnet test
 
 出力された `epubfabric.exe` は .NET のインストールされていない Windows でもそのまま実行できます。
 
+### インストーラー（Inno Setup）
+
+[Inno Setup 6](https://jrsoftware.org/isinfo.php) がインストールされていれば、セットアップ EXE を作成できます:
+
+```powershell
+.\scripts\build-installer.ps1 -Version 1.0.0
+# → publish\installer\EpubFabric-Setup-1.0.0.exe
+```
+
+インストーラーは日本語/英語対応で、管理者（Program Files）・ユーザー単位（%LocalAppData%\Programs）のどちらでもインストールできます。「PATH 環境変数に追加する」タスクを選ぶと、コマンドプロンプトからそのまま `epubfabric` を実行できます（アンインストール時に除去されます）。
+
 ## 使い方（CLI）
 
 ```powershell
