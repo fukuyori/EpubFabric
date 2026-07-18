@@ -78,7 +78,7 @@ public sealed class EpubXhtmlGenerator
                 continue;
             }
 
-            elements.Add(CreateElement(block.Type, text));
+            elements.Add(CreateElement(block, text));
         }
 
         return elements;
@@ -113,11 +113,12 @@ public sealed class EpubXhtmlGenerator
         return figure;
     }
 
-    private static XElement CreateElement(BlockType type, string text) => type switch
+    private static XElement CreateElement(PageBlock block, string text) => block.Type switch
     {
-        BlockType.ChapterTitle => new XElement(Xhtml + "h1", text),
-        BlockType.SectionHeading => new XElement(Xhtml + "h2", text),
-        BlockType.Subheading => new XElement(Xhtml + "h3", text),
+        // 見出しには目次（nav.xhtml）からアンカーで参照できるようidを付ける。
+        BlockType.ChapterTitle => new XElement(Xhtml + "h1", new XAttribute("id", block.Id), text),
+        BlockType.SectionHeading => new XElement(Xhtml + "h2", new XAttribute("id", block.Id), text),
+        BlockType.Subheading => new XElement(Xhtml + "h3", new XAttribute("id", block.Id), text),
         BlockType.Caption => new XElement(Xhtml + "p", new XAttribute("class", "caption"), text),
         BlockType.Aside => new XElement(Xhtml + "aside", new XAttribute(EpubOps + "type", "sidebar"), new XElement(Xhtml + "p", text)),
         BlockType.PullQuote => new XElement(Xhtml + "blockquote", new XElement(Xhtml + "p", text)),

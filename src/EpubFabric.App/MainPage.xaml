@@ -8,7 +8,8 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Padding="24" RowSpacing="16">
+    <Grid Padding="24" RowSpacing="16" AllowDrop="True" DragOver="OnDragOver" Drop="OnDrop"
+          Background="Transparent">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -48,12 +49,14 @@
                 <ComboBoxItem Content="リフロー型" />
             </ComboBox>
             <NumberBox x:Name="DpiBox" Header="DPI" Value="300" Minimum="72" Maximum="600" SmallChange="50" SpinButtonPlacementMode="Compact" MinWidth="120" />
+            <NumberBox x:Name="MaxPagesBox" Header="ページ数上限（0=全）" Value="0" Minimum="0" SpinButtonPlacementMode="Compact" MinWidth="140" />
             <ComboBox x:Name="WritingModeCombo" Header="書字方向" SelectedIndex="0" MinWidth="150">
                 <ComboBoxItem Content="自動判定" />
                 <ComboBoxItem Content="横書き（左綴じ）" />
                 <ComboBoxItem Content="縦書き（右綴じ）" />
             </ComboBox>
             <CheckBox x:Name="EnhanceCheck" Content="紙面の高品質化" VerticalAlignment="Bottom" />
+            <CheckBox x:Name="ForceOcrCheck" Content="常にOCR（テキスト層を無視）" VerticalAlignment="Bottom" />
             <CheckBox x:Name="OllamaCheck" Content="Ollama 分類・校正" VerticalAlignment="Bottom" Checked="OnOllamaCheckChanged" Unchecked="OnOllamaCheckChanged" />
             <TextBox x:Name="OllamaModelBox" Header="Ollama モデル" Text="gemma4:12b" MinWidth="160" IsEnabled="False" />
         </StackPanel>

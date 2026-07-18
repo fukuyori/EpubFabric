@@ -50,7 +50,7 @@ public sealed class EpubPackageBuilder
 
         WriteXml(zip, "META-INF/container.xml", BuildContainerXml());
         WriteXml(zip, "EPUB/package.opf", BuildPackageOpf(project, chapters, images));
-        WriteXml(zip, "EPUB/nav.xhtml", BuildNavXhtml(project.Title, chapters));
+        WriteXml(zip, "EPUB/nav.xhtml", BuildNavXhtml(project.Title, chapters, blocksById));
         WriteText(zip, "EPUB/styles/book.css", EpubStylesheet.Content);
 
         for (var i = 0; i < chapters.Count; i++)
@@ -156,12 +156,41 @@ public sealed class EpubPackageBuilder
                 new XElement(Opf + "spine", spineItems)));
     }
 
-    private static XDocument BuildNavXhtml(string title, IReadOnlyList<DocumentChapter> chapters)
+    /// <summary>
+    /// 本文の見出し処理と同じデータから目次を作る。章（h1）を最上位に、章内の
+    /// 節見出し（h2）をアンカー付きで入れ子にする。小見出し（h3）は数が多く
+    /// 目次が破綻しやすいため含めない。
+    /// </summary>
+    private static XDocument BuildNavXhtml(
+        string title,
+        IReadOnlyList<DocumentChapter> chapters,
+        IReadOnlyDictionary<string, PageBlock> blocksById)
     {
         var safeTitle = XmlTextSanitizer.Sanitize(title);
-        var listItems = chapters.Select((chapter, i) => new XElement(
-            Xhtml + "li",
-            new XElement(Xhtml + "a", new XAttribute("href", $"text/{ChapterFileName(i)}"), XmlTextSanitizer.Sanitize(chapter.Title))));
+        var listItems = chapters.Select((chapter, i) =>
+        {
+            var item = new XElement(
+                Xhtml + "li",
+                new XElement(Xhtml + "a", new XAttribute("href", $"text/{ChapterFileName(i)}"), XmlTextSanitizer.Sanitize(chapter.Title)));
+
+            var sectionItems = chapter.BlockIds
+                .Select(id => blocksById.GetValueOrDefault(id))
+                .Where(b => b is { Type: BlockType.SectionHeading })
+                .Select(b => XmlTextSanitizer.Sanitize(b!.CorrectedText ?? b.OcrText) is { Length: > 0 } text
+                    ? new XElement(
+                        Xhtml + "li",
+                        new XElement(Xhtml + "a", new XAttribute("href", $"text/{ChapterFileName(i)}#{b.Id}"), text))
+                    : null)
+                .Where(li => li is not null)
+                .ToList();
+
+            if (sectionItems.Count > 0)
+            {
+                item.Add(new XElement(Xhtml + "ol", sectionItems));
+            }
+
+            return item;
+        });
 
         var nav = new XElement(
             Xhtml + "nav",

@@ -50,6 +50,53 @@ public class HeuristicLayoutAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzePage_HugeTextMidPage_IsDecorativeNotChapterTitle()
+    {
+        // 挿絵・作例内の巨大な文字（漫画の台詞など）はページ上部にないため章タイトルにしない。
+        var lines = new List<TextLine>
+        {
+            new(new BoundingBox(0.3, 0.55, 0.3, 0.08), "SWAP!", 0.9),
+            new(new BoundingBox(0.1, 0.15, 0.7, 0.03), "本文の一行目がここにあります。", 0.9),
+            new(new BoundingBox(0.1, 0.19, 0.7, 0.03), "本文の二行目がここにあります。", 0.9),
+        };
+
+        var blocks = _analyzer.AnalyzePage(pageNumber: 1, lines);
+
+        Assert.Equal(BlockType.Decorative, blocks.Single(b => b.OcrText == "SWAP!").Type);
+    }
+
+    [Fact]
+    public void AnalyzePage_HugeShortTextAtTop_IsDecorativeNotChapterTitle()
+    {
+        // ページ上部でも1〜2文字の巨大文字（ドロップキャップ・飾り文字）は章タイトルにしない。
+        var lines = new List<TextLine>
+        {
+            new(new BoundingBox(0.1, 0.12, 0.06, 0.08), "米", 0.9),
+            new(new BoundingBox(0.1, 0.25, 0.7, 0.03), "本文の一行目がここにあります。", 0.9),
+            new(new BoundingBox(0.1, 0.29, 0.7, 0.03), "本文の二行目がここにあります。", 0.9),
+        };
+
+        var blocks = _analyzer.AnalyzePage(pageNumber: 1, lines);
+
+        Assert.Equal(BlockType.Decorative, blocks.Single(b => b.OcrText == "米").Type);
+    }
+
+    [Fact]
+    public void AnalyzePage_HugeTitleAtTop_IsChapterTitle()
+    {
+        var lines = new List<TextLine>
+        {
+            new(new BoundingBox(0.1, 0.12, 0.6, 0.07), "1 FUNDAMENTAL FORTH", 0.9),
+            new(new BoundingBox(0.1, 0.30, 0.7, 0.03), "本文の一行目がここにあります。", 0.9),
+            new(new BoundingBox(0.1, 0.34, 0.7, 0.03), "本文の二行目がここにあります。", 0.9),
+        };
+
+        var blocks = _analyzer.AnalyzePage(pageNumber: 1, lines);
+
+        Assert.Equal(BlockType.ChapterTitle, blocks.Single(b => b.OcrText == "1 FUNDAMENTAL FORTH").Type);
+    }
+
+    [Fact]
     public void AnalyzePage_FigureRegionCoveredByCodeLines_BecomesCodeBlockKeepingText()
     {
         // 罫線囲みのコード例: 図として検出されても、テキスト行の被覆率が高くコード記号を

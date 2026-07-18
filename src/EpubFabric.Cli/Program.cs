@@ -72,7 +72,10 @@ static async Task<int> RunConvert(string[] args)
         ollamaOptions,
         preserveAllTextLines: layout == OutputLayout.Fixed,
         enhancePages: options.ContainsKey("--enhance"),
-        writingMode: ParseWritingMode(options));
+        writingMode: ParseWritingMode(options),
+        forceOcr: options.ContainsKey("--force-ocr"),
+        language: options.GetValueOrDefault("--language"),
+        maxPages: ParseMaxPages(options));
 
     BuildEpub(project, layout, outputPath, ParsePageImageOptions(options));
 
@@ -102,7 +105,11 @@ static async Task<int> RunEvaluate(string[] args)
         dpi,
         ollamaOptions,
         preserveAllTextLines: false,
-        enhancePages: options.ContainsKey("--enhance"));
+        enhancePages: options.ContainsKey("--enhance"),
+        writingMode: ParseWritingMode(options),
+        forceOcr: options.ContainsKey("--force-ocr"),
+        language: options.GetValueOrDefault("--language"),
+        maxPages: ParseMaxPages(options));
 
     var blocksById = pages.SelectMany(p => p.Blocks).ToDictionary(b => b.Id);
     var summary = new LayoutEvaluator().Evaluate(pages);
@@ -181,7 +188,10 @@ static async Task<int> RunAnalyze(string[] args)
         ollamaOptions,
         preserveAllTextLines: true,
         enhancePages: options.ContainsKey("--enhance"),
-        writingMode: ParseWritingMode(options));
+        writingMode: ParseWritingMode(options),
+        forceOcr: options.ContainsKey("--force-ocr"),
+        language: options.GetValueOrDefault("--language"),
+        maxPages: ParseMaxPages(options));
 
     new EfprojStore().Save(project, projectDirectory);
 
@@ -297,7 +307,10 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
     OllamaOptions? ollamaOptions = null,
     bool preserveAllTextLines = true,
     bool enhancePages = false,
-    WritingModeSetting writingMode = WritingModeSetting.Auto)
+    WritingModeSetting writingMode = WritingModeSetting.Auto,
+    bool forceOcr = false,
+    string? language = null,
+    int? maxPages = null)
 {
     var options = new ConversionOptions
     {
@@ -306,7 +319,10 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
         Dpi = dpi,
         PreserveAllTextLines = preserveAllTextLines,
         EnhancePages = enhancePages,
+        ForceOcr = forceOcr,
         WritingMode = writingMode,
+        Language = language,
+        MaxPages = maxPages,
         Ollama = ollamaOptions is { Enabled: true }
             ? new OllamaPipelineOptions(ollamaOptions.Endpoint, ollamaOptions.Model)
             : null,
@@ -361,6 +377,12 @@ static PageImageEncodingOptions ParsePageImageOptions(Dictionary<string, string>
     return new PageImageEncodingOptions(quality, maxSide);
 }
 
+// 先頭からの変換ページ数の上限（--max-pages）。未指定・不正値は全ページ。
+static int? ParseMaxPages(Dictionary<string, string> options) =>
+    options.TryGetValue("--max-pages", out var value) && int.TryParse(value, out var pages) && pages > 0
+        ? pages
+        : null;
+
 // 書字方向: 既定は自動判定。--vertical / --horizontal で強制できる。
 static WritingModeSetting ParseWritingMode(Dictionary<string, string> options) =>
     options.ContainsKey("--vertical") ? WritingModeSetting.Vertical
@@ -387,7 +409,7 @@ static void PrintUsage()
 {
     Console.WriteLine("使い方:");
     Console.WriteLine("  epubfabric info <input.pdf>");
-    Console.WriteLine("  epubfabric convert <input.pdf> [--output <output.epub>] [--layout <fixed|reflow>] [--dpi <dpi>] [--enhance] [--vertical|--horizontal] [--image-quality <1-100>] [--max-image-size <px>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
+    Console.WriteLine("  epubfabric convert <input.pdf> [--output <output.epub>] [--layout <fixed|reflow>] [--dpi <dpi>] [--enhance] [--force-ocr] [--language <code>] [--max-pages <n>] [--vertical|--horizontal] [--image-quality <1-100>] [--max-image-size <px>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric evaluate <input.pdf> [--report <report-dir>] [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric analyze <input.pdf> --project <book.efproj> [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric export <book.efproj> --format epub [--output <output.epub>] [--layout <fixed|reflow>] [--image-quality <1-100>] [--max-image-size <px>]");
@@ -397,6 +419,9 @@ static void PrintUsage()
     Console.WriteLine("  固定レイアウトのページ画像はJPEG品質85・長辺2200pxへ再圧縮して収録します（--image-quality / --max-image-size で変更、--max-image-size 0 で縮小なし）。");
     Console.WriteLine("  --enhance を指定すると、スキャン紙面を高品質化（紙色の白色正規化・コントラスト補正・裏写り抑制）してEPUB収録・OCRに使います。");
     Console.WriteLine("  書字方向は既定で自動判定します（縦書きの本は右綴じ・右→左の読み順になる）。--vertical / --horizontal で強制できます。");
+    Console.WriteLine("  --force-ocr を指定すると、PDFのテキスト層を使わず全ページをOCRで再認識します（古いスキャンOCR由来の低精度テキスト層を持つPDF向け）。");
+    Console.WriteLine("  言語（dc:language）は認識テキストから自動判定します（ja/en/zh/ko）。--language <code> で強制できます。");
+    Console.WriteLine("  --max-pages <n> を指定すると先頭からnページまでで変換を打ち切ります（試し変換・設定調整用）。");
     Console.WriteLine("  1ページ目の画像は表紙（cover-image）として設定されます。");
     Console.WriteLine("  --ollama を指定すると、Ollamaによる意味分類（見出し・本文などの補正）とOCR文字列の校正を行います（既定では無効）。");
     Console.WriteLine("  --ollama-model の既定値: gemma4:12b / --ollama-endpoint の既定値: http://localhost:11434");

@@ -37,8 +37,18 @@ public sealed class ConversionPipeline
         var pageEnhancer = options.EnhancePages ? new PageImageEnhancer() : null;
         var info = pdfService.GetInfo(options.InputPath);
 
+        // 先頭からの変換ページ数（--max-pages。試し変換・設定調整用）。
+        var pageCount = options.MaxPages is { } maxPages && maxPages > 0
+            ? Math.Min(maxPages, info.PageCount)
+            : info.PageCount;
+
         void Report(int pageNumber, string message) =>
-            progress?.Report(new ConversionProgress(pageNumber, info.PageCount, message));
+            progress?.Report(new ConversionProgress(pageNumber, pageCount, message));
+
+        if (pageCount < info.PageCount)
+        {
+            Report(0, $"先頭{pageCount}ページのみ変換します（全{info.PageCount}ページ）。");
+        }
 
         if (options.EnhancePages)
         {
@@ -64,13 +74,20 @@ public sealed class ConversionPipeline
             }
         }
 
-        var pagesNeedingOcr = info.Pages.Count(p => !p.HasText);
-        if (pagesNeedingOcr > 0)
+        if (options.ForceOcr)
         {
-            var ocrPurpose = options.PreserveAllTextLines
-                ? "認識文字と行座標を透明テキスト層に使用します。"
-                : "認識文字と行座標から見出し・段組みを推定します。";
-            Report(0, $"{pagesNeedingOcr}/{info.PageCount} ページにテキストレイヤーがありません。OCR（PP-OCRv6多言語モデル）で{ocrPurpose}");
+            Report(0, "PDFのテキスト層を使わず、全ページをOCR（PP-OCRv6多言語モデル）で再認識します（--force-ocr）。");
+        }
+        else
+        {
+            var pagesNeedingOcr = info.Pages.Take(pageCount).Count(p => !p.HasText);
+            if (pagesNeedingOcr > 0)
+            {
+                var ocrPurpose = options.PreserveAllTextLines
+                    ? "認識文字と行座標を透明テキスト層に使用します。"
+                    : "認識文字と行座標から見出し・段組みを推定します。";
+                Report(0, $"{pagesNeedingOcr}/{pageCount} ページにテキストレイヤーがありません。OCR（PP-OCRv6多言語モデル）で{ocrPurpose}");
+            }
         }
 
         Directory.CreateDirectory(workDirectory);
@@ -84,12 +101,12 @@ public sealed class ConversionPipeline
             var reviewRequiredCount = 0;
             var detectedPageModes = new List<WritingMode>();
 
-            for (var i = 0; i < info.PageCount; i++)
+            for (var i = 0; i < pageCount; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var pageNumber = i + 1;
-                Report(pageNumber, $"ページ {pageNumber}/{info.PageCount} を処理しています...");
+                Report(pageNumber, $"ページ {pageNumber}/{pageCount} を処理しています...");
 
                 var imagePath = Path.Combine(workDirectory, $"page-original-{pageNumber:0000}.png");
                 pdfService.RenderPageToPng(options.InputPath, pageNumber, imagePath, options.Dpi);
@@ -119,12 +136,12 @@ public sealed class ConversionPipeline
                 var pageInfo = info.Pages[i];
                 var pageBlocks = new List<PageBlock>();
                 string? fallbackPdfText = null;
-                var requiresOcr = !pageInfo.HasText;
+                var requiresOcr = !pageInfo.HasText || options.ForceOcr;
                 var pageWritingMode = options.WritingMode == WritingModeSetting.Vertical
                     ? WritingMode.Vertical
                     : WritingMode.Horizontal;
 
-                if (pageInfo.HasText)
+                if (pageInfo.HasText && !options.ForceOcr)
                 {
                     var rawText = pdfService.ExtractPageText(options.InputPath, pageNumber);
                     var textLines = pdfService.ExtractTextLines(options.InputPath, pageNumber);
@@ -272,13 +289,13 @@ public sealed class ConversionPipeline
 
             if (reviewRequiredCount > 0)
             {
-                Report(info.PageCount, $"{reviewRequiredCount} 件のブロックがOCR信頼度0.85未満のため要確認です。");
+                Report(pageCount,$"{reviewRequiredCount} 件のブロックがOCR信頼度0.85未満のため要確認です。");
             }
 
             var pdfTextPageCount = pages.Count(page => page.Blocks.Any(block => block.TextSource == TextSourceKind.PdfTextLayer));
             var ocrTextPageCount = pages.Count(page => page.Blocks.Any(block => block.TextSource == TextSourceKind.Ocr));
             var noTextPageCount = pages.Count(page => page.Blocks.All(block => block.TextSource == TextSourceKind.Unknown));
-            Report(info.PageCount, $"文字情報の取得元: PDF {pdfTextPageCount}ページ / OCR {ocrTextPageCount}ページ / 文字なし {noTextPageCount}ページ");
+            Report(pageCount,$"文字情報の取得元: PDF {pdfTextPageCount}ページ / OCR {ocrTextPageCount}ページ / 文字なし {noTextPageCount}ページ");
 
             // 綴じ方向は縦書きページの多数決で決める（強制指定があればそれに従う）。
             var documentMode = options.WritingMode switch
@@ -291,7 +308,15 @@ public sealed class ConversionPipeline
             if (options.WritingMode == WritingModeSetting.Auto && documentMode == WritingMode.Vertical)
             {
                 var verticalPages = detectedPageModes.Count(m => m == WritingMode.Vertical);
-                Report(info.PageCount, $"縦書きと判定しました（縦書き{verticalPages}/横書き{detectedPageModes.Count - verticalPages}ページ）。右綴じで出力します。");
+                Report(pageCount,$"縦書きと判定しました（縦書き{verticalPages}/横書き{detectedPageModes.Count - verticalPages}ページ）。右綴じで出力します。");
+            }
+
+            // 言語は認識テキストの文字種から自動判定する（--languageで強制可能）。
+            var language = options.Language ?? LanguageDetector.Detect(
+                pages.SelectMany(p => p.Blocks).Select(b => b.CorrectedText ?? b.OcrText));
+            if (options.Language is null)
+            {
+                Report(pageCount,$"言語: {language}（自動判定）");
             }
 
             var project = new EpubFabricProject
@@ -299,6 +324,7 @@ public sealed class ConversionPipeline
                 Id = Guid.NewGuid(),
                 Title = Path.GetFileNameWithoutExtension(options.InputPath),
                 SourcePdfPath = options.InputPath,
+                Language = language,
                 WritingMode = documentMode,
                 Pages = pages,
             };

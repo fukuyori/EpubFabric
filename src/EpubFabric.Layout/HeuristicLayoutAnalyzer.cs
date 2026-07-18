@@ -27,6 +27,12 @@ public sealed class HeuristicLayoutAnalyzer
     /// <summary>太字見出し候補の最小文字数（空白除く）。句読点だけの断片行を除外する。</summary>
     private const int BoldSubheadingMinLength = 4;
 
+    /// <summary>章タイトルとみなす行のページ内の最大Y位置。章の大見出しはページ上部にある。</summary>
+    private const double ChapterTitleMaxTop = 0.4;
+
+    /// <summary>章タイトルの最小文字数（空白除く）。挿絵内の1〜2文字の巨大文字を除外する。</summary>
+    private const int ChapterTitleMinLength = 3;
+
     private const double MarginBand = 0.06; // 上下6%を柱・ノンブルの候補域とする。
     private const int RunningTextMaxLength = 30;
     private const double MaxCaptionGap = 0.03; // 図の下端からキャプション候補行までの最大距離。
@@ -283,6 +289,25 @@ public sealed class HeuristicLayoutAnalyzer
             >= SubheadingRatio => BlockType.Subheading,
             _ => BlockType.Body,
         };
+
+        // 大きな文字＝章タイトルとは限らない。挿絵・作例内の巨大な文字（漫画の
+        // 台詞・見本文字）を章に昇格させると章分割と目次が崩壊するため、
+        // 「ページ上部にあり、意味のある長さの英数字を含む」行だけを章タイトルとし、
+        // それ以外の巨大文字は装飾として扱う。
+        if (byHeight == BlockType.ChapterTitle)
+        {
+            var trimmed = line.Text.Trim();
+            var length = trimmed.Count(c => !char.IsWhiteSpace(c));
+            var qualifies = line.Bounds.Y < ChapterTitleMaxTop
+                && length >= ChapterTitleMinLength
+                && trimmed.Any(char.IsLetterOrDigit)
+                && !trimmed.All(c => char.IsDigit(c) || char.IsWhiteSpace(c)) // 表中の大きな数値
+                && char.IsLetterOrDigit(trimmed[0]); // 「: WASHER」「-STAR」のようなコード断片
+            if (!qualifies)
+            {
+                return BlockType.Decorative;
+            }
+        }
 
         // 高さが本文並みでも、本文より明確にインクが濃い短い行はゴシック太字の見出しと
         // みなす（高さ基準では検出できない 0b(c) のケース）。密度が高すぎる行は

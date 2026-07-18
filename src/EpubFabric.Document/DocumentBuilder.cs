@@ -26,14 +26,31 @@ public sealed class DocumentBuilder
             return [BuildSingleChapter(fallbackTitle, orderedBlocks)];
         }
 
+        // これより本文ブロックが少ない章は独立させない。誤検出された章タイトルが近接して
+        // 連続するケース（表の各行が巨大な文字で章化する等）で、目次が断片だらけになるのを防ぐ。
+        // 表紙・前付け（フォールバック章）の直後の最初の章タイトルは常に分割を許可する。
+        const int minBlocksBeforeSplit = 3;
+
         var sections = new List<(string Title, int HeadingLevel, List<string> BlockIds)>();
+        var lastSectionIsFallback = false;
 
         foreach (var block in orderedBlocks)
         {
             if (block.Type is BlockType.ChapterTitle)
             {
+                if (sections.Count > 0
+                    && !lastSectionIsFallback
+                    && sections[^1].BlockIds.Count < minBlocksBeforeSplit)
+                {
+                    // 直前の章がまだ十分な本文を持たないうちに次の章タイトルが来た場合は
+                    // 章を分割せず、本文内のh1として残す。
+                    sections[^1].BlockIds.Add(block.Id);
+                    continue;
+                }
+
                 var title = string.IsNullOrWhiteSpace(block.CorrectedText) ? block.OcrText : block.CorrectedText;
                 sections.Add((title, block.HeadingLevel ?? 1, []));
+                lastSectionIsFallback = false;
                 continue; // 見出し自体はTitleへ引き継ぐため、本文ブロックには含めない。
             }
 
@@ -41,6 +58,7 @@ public sealed class DocumentBuilder
             {
                 // 最初の見出しより前に現れるブロック（表紙情報など）用の章。
                 sections.Add((fallbackTitle, 1, []));
+                lastSectionIsFallback = true;
             }
 
             sections[^1].BlockIds.Add(block.Id);

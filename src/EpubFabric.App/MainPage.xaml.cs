@@ -31,11 +31,50 @@ public sealed partial class MainPage : Page
         // 起動引数でPDFが渡されていれば選択済みの状態で開始する。
         if (App.StartupPdfPath is { } startupPdf)
         {
-            InputPathBox.Text = startupPdf;
-            OutputPathBox.Text = Path.ChangeExtension(startupPdf, ".epub");
-            ConvertButton.IsEnabled = true;
-            StatusText.Text = "変換を開始できます。";
+            SetInputPdf(startupPdf);
         }
+    }
+
+    private void OnDragOver(object sender, Microsoft.UI.Xaml.DragEventArgs e)
+    {
+        // 変換中はドロップを受け付けない。
+        if (_cancellation is not null || !e.DataView.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems))
+        {
+            e.AcceptedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.None;
+            return;
+        }
+
+        e.AcceptedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Copy;
+        e.DragUIOverride.Caption = "PDF を入力として開く";
+    }
+
+    private async void OnDrop(object sender, Microsoft.UI.Xaml.DragEventArgs e)
+    {
+        if (_cancellation is not null || !e.DataView.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems))
+        {
+            return;
+        }
+
+        var items = await e.DataView.GetStorageItemsAsync();
+        var pdf = items.OfType<Windows.Storage.StorageFile>()
+            .FirstOrDefault(f => f.FileType.Equals(".pdf", StringComparison.OrdinalIgnoreCase));
+        if (pdf is null)
+        {
+            StatusText.Text = "PDF ファイルをドロップしてください。";
+            return;
+        }
+
+        SetInputPdf(pdf.Path);
+    }
+
+    private void SetInputPdf(string path)
+    {
+        InputPathBox.Text = path;
+        OutputPathBox.Text = Path.ChangeExtension(path, ".epub");
+        ConvertButton.IsEnabled = true;
+        EditorButton.IsEnabled = false;
+        OpenFolderButton.IsEnabled = false;
+        StatusText.Text = "変換を開始できます。";
     }
 
     private async void OnPickInputClick(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
@@ -48,19 +87,10 @@ public sealed partial class MainPage : Page
         InitializeWithMainWindow(picker);
 
         var file = await picker.PickSingleFileAsync();
-        if (file is null)
+        if (file is not null)
         {
-            return;
+            SetInputPdf(file.Path);
         }
-
-        InputPathBox.Text = file.Path;
-        if (string.IsNullOrWhiteSpace(OutputPathBox.Text))
-        {
-            OutputPathBox.Text = Path.ChangeExtension(file.Path, ".epub");
-        }
-
-        ConvertButton.IsEnabled = true;
-        StatusText.Text = "変換を開始できます。";
     }
 
     private async void OnPickOutputClick(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
@@ -104,6 +134,8 @@ public sealed partial class MainPage : Page
             Dpi = double.IsNaN(DpiBox.Value) ? 300 : (int)DpiBox.Value,
             PreserveAllTextLines = layout == OutputLayout.Fixed,
             EnhancePages = EnhanceCheck.IsChecked == true,
+            ForceOcr = ForceOcrCheck.IsChecked == true,
+            MaxPages = !double.IsNaN(MaxPagesBox.Value) && MaxPagesBox.Value > 0 ? (int)MaxPagesBox.Value : null,
             WritingMode = WritingModeCombo.SelectedIndex switch
             {
                 1 => WritingModeSetting.Horizontal,
@@ -207,7 +239,9 @@ public sealed partial class MainPage : Page
         LayoutCombo.IsEnabled = !running;
         WritingModeCombo.IsEnabled = !running;
         DpiBox.IsEnabled = !running;
+        MaxPagesBox.IsEnabled = !running;
         EnhanceCheck.IsEnabled = !running;
+        ForceOcrCheck.IsEnabled = !running;
         OllamaCheck.IsEnabled = !running;
         OllamaModelBox.IsEnabled = !running && OllamaCheck.IsChecked == true;
     }
