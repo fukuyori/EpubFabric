@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using EpubFabric.Core.Models;
 using EpubFabric.Document;
 using EpubFabric.Epub;
@@ -9,6 +9,7 @@ using EpubFabric.Ocr;
 using EpubFabric.Ollama;
 using EpubFabric.Pdf;
 using EpubFabric.Persistence;
+using EpubFabric.Pipeline;
 
 Console.OutputEncoding = Encoding.UTF8;
 
@@ -233,19 +234,8 @@ static int RunExport(string[] args)
     return 0;
 }
 
-static void BuildEpub(EpubFabricProject project, OutputLayout layout, string outputPath, PageImageOptions? imageOptions = null)
-{
-    if (layout == OutputLayout.Fixed)
-    {
-        imageOptions ??= new PageImageOptions(85, 2200);
-        new FixedLayoutEpubPackageBuilder(imageOptions.JpegQuality, imageOptions.MaxSideLength).Build(project, outputPath);
-        return;
-    }
-
-    var chapters = new DocumentBuilder().BuildChapters(project.Pages, project.Title);
-    var blocksById = project.Pages.SelectMany(p => p.Blocks).ToDictionary(b => b.Id);
-    new EpubPackageBuilder().Build(project, chapters, blocksById, outputPath);
-}
+static void BuildEpub(EpubFabricProject project, OutputLayout layout, string outputPath, PageImageEncodingOptions? imageOptions = null) =>
+    new ConversionPipeline().BuildEpub(project, layout, outputPath, imageOptions);
 
 static bool TryParseLayout(Dictionary<string, string> options, out OutputLayout layout)
 {
@@ -297,6 +287,7 @@ static int RunInfo(string[] args)
     return 0;
 }
 
+// 変換パイプライン本体はEpubFabric.Pipeline（GUIと共有）。CLIは進捗をコンソールへ流すだけ。
 static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildProjectFromPdf(
     string inputPath,
     string workDirectory,
@@ -305,284 +296,19 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
     bool preserveAllTextLines = true,
     bool enhancePages = false)
 {
-    var pdfService = new PdfDocumentService();
-    var textLayerEvaluator = new PdfTextLayerQualityEvaluator();
-    var layoutAnalyzer = new HeuristicLayoutAnalyzer();
-    var paragraphMerger = new ParagraphMerger();
-    var textLayerBlockBuilder = new TextLayerBlockBuilder();
-    var regionDetector = new NonTextRegionDetector();
-    var figureExtractor = new FigureImageExtractor();
-    var ocrPreprocessor = new OcrImagePreprocessor();
-    var pageEnhancer = enhancePages ? new PageImageEnhancer() : null;
-    var info = pdfService.GetInfo(inputPath);
-
-    if (enhancePages)
+    var options = new ConversionOptions
     {
-        Console.WriteLine("ページ画像の高品質化（紙色正規化・裏写り抑制）を行います。");
-    }
+        InputPath = inputPath,
+        WorkDirectory = workDirectory,
+        Dpi = dpi,
+        PreserveAllTextLines = preserveAllTextLines,
+        EnhancePages = enhancePages,
+        Ollama = ollamaOptions is { Enabled: true }
+            ? new OllamaPipelineOptions(ollamaOptions.Endpoint, ollamaOptions.Model)
+            : null,
+    };
 
-    PageBlockClassifier? classifier = null;
-    OcrTextCorrector? corrector = null;
-
-    if (ollamaOptions is { Enabled: true })
-    {
-        var client = new OllamaClient(ollamaOptions.Endpoint);
-        if (await client.IsAvailableAsync())
-        {
-            classifier = new PageBlockClassifier(client, ollamaOptions.Model);
-            corrector = new OcrTextCorrector(client, ollamaOptions.Model);
-            Console.WriteLine($"Ollama({ollamaOptions.Model})による意味分類とOCR校正を行います。");
-        }
-        else
-        {
-            // 16章「Ollamaに接続できない」: Ollamaなしで処理を継続する。
-            Console.WriteLine($"警告: Ollamaサーバー（{ollamaOptions.Endpoint}）に接続できません。Ollamaなしで処理を続けます。");
-        }
-    }
-
-    var pagesNeedingOcr = info.Pages.Count(p => !p.HasText);
-    if (pagesNeedingOcr > 0)
-    {
-        var ocrPurpose = preserveAllTextLines
-            ? "認識文字と行座標を透明テキスト層に使用します。"
-            : "認識文字と行座標から見出し・段組みを推定します。";
-        Console.WriteLine($"{pagesNeedingOcr}/{info.PageCount} ページにテキストレイヤーがありません。OCR（PP-OCRv6多言語モデル）で{ocrPurpose}");
-    }
-
-    Directory.CreateDirectory(workDirectory);
-
-    PageOcrService? ocrService = null;
-    var ocrUnavailable = false;
-
-    try
-    {
-        var pages = new List<DocumentPage>();
-        var reviewRequiredCount = 0;
-
-        for (var i = 0; i < info.PageCount; i++)
-        {
-            var pageNumber = i + 1;
-            Console.WriteLine($"ページ {pageNumber}/{info.PageCount} を処理しています...");
-
-            var imagePath = Path.Combine(workDirectory, $"page-original-{pageNumber:0000}.png");
-            pdfService.RenderPageToPng(inputPath, pageNumber, imagePath, dpi);
-
-            // 高品質化（--enhance）: 紙色正規化・裏写り抑制を適用した画像を、表示（EPUB収録）と
-            // OCR入力の両方に使う。幾何変換を含まないため座標には影響しない。
-            var displayImagePath = imagePath;
-            if (pageEnhancer is not null)
-            {
-                try
-                {
-                    var enhanceResult = pageEnhancer.Enhance(
-                        imagePath,
-                        Path.Combine(workDirectory, $"page-enhanced-{pageNumber:0000}.png"));
-                    if (enhanceResult.Applied)
-                    {
-                        displayImagePath = enhanceResult.ImagePath;
-                        Console.WriteLine($"  紙面を高品質化しました（紙{enhanceResult.PaperLuminance:0}・インク{enhanceResult.InkLuminance:0}）。");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"警告: 高品質化に失敗しました（{ex.Message}）。元画像を使用します。");
-                }
-            }
-
-            var pageInfo = info.Pages[i];
-            var pageBlocks = new List<PageBlock>();
-            string? fallbackPdfText = null;
-            var requiresOcr = !pageInfo.HasText;
-
-            if (pageInfo.HasText)
-            {
-                var rawText = pdfService.ExtractPageText(inputPath, pageNumber);
-                var textLines = pdfService.ExtractTextLines(inputPath, pageNumber);
-                var assessment = textLayerEvaluator.Assess(rawText, textLines);
-
-                if (assessment.IsUsable)
-                {
-                    pageBlocks = BuildTextBlocks(pageNumber, displayImagePath, textLines);
-                }
-                else
-                {
-                    requiresOcr = true;
-                    fallbackPdfText = rawText;
-                    Console.WriteLine($"  PDF文字レイヤーを使用しません: {assessment.Reason} OCRへ切り替えます。");
-                }
-            }
-
-            if (requiresOcr && !ocrUnavailable)
-            {
-                try
-                {
-                    ocrService ??= new PageOcrService();
-                    await ocrService.InitializeAsync(new OcrModelProvisioner());
-
-                    // 9.3 前処理: 傾きを補正した画像でOCRし、座標は表示画像の座標系へ戻す。
-                    // 傾き補正済み画像はOCR専用で、表示・EPUB出力には使わない（原型保証）。
-                    var ocrInputPath = displayImagePath;
-                    OcrPreprocessResult? preprocess = null;
-                    try
-                    {
-                        preprocess = ocrPreprocessor.Preprocess(
-                            displayImagePath,
-                            Path.Combine(workDirectory, $"page-deskewed-{pageNumber:0000}.png"));
-                        if (preprocess.DeskewApplied)
-                        {
-                            ocrInputPath = preprocess.ImagePathForOcr;
-                            Console.WriteLine($"  傾き{preprocess.SkewAngleDegrees:+0.0;-0.0}°を補正した画像でOCRします。");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        // 前処理は精度向上のための補助であり、失敗しても元画像でOCRを続行する。
-                        Console.WriteLine($"警告: OCR前処理に失敗しました（{ex.Message}）。元画像でOCRします。");
-                    }
-
-                    var ocrResult = ocrService.RecognizePage(ocrInputPath);
-                    var ocrLines = ocrResult.Lines;
-
-                    if (preprocess is { DeskewApplied: true })
-                    {
-                        ocrLines = ocrLines
-                            .Select(line => line with { Bounds = preprocess.MapToOriginal(line.Bounds) })
-                            .ToList();
-                    }
-
-                    if (ocrResult.DroppedLineCount > 0)
-                    {
-                        Console.WriteLine($"  低信頼のOCRゴミ行{ocrResult.DroppedLineCount}件を除外しました。");
-                    }
-
-                    pageBlocks = BuildTextBlocks(pageNumber, displayImagePath, ocrLines);
-                }
-                catch (Exception ex) when (ex is OcrModelDownloadException or InvalidOperationException)
-                {
-                    // 16章「OCRモデルがない」: OCRなしで処理を継続する。
-                    Console.WriteLine($"警告: OCRを利用できません（{ex.Message}）。");
-                    ocrUnavailable = true;
-                }
-            }
-
-            // 座標付きPDF文字が使えず、OCRも利用できない場合だけ、検索可能性を完全に
-            // 失わないために座標なしのPDF文字を要確認ブロックとして残す。
-            if (pageBlocks.Count == 0 && !string.IsNullOrWhiteSpace(fallbackPdfText))
-            {
-                pageBlocks.Add(new PageBlock
-                {
-                    Id = $"p{pageNumber:0000}-b0001",
-                    PageNumber = pageNumber,
-                    Bounds = new BoundingBox(0, 0, 1, 1),
-                    Type = BlockType.Body,
-                    OcrText = fallbackPdfText,
-                    OcrConfidence = 0.5,
-                    TextSource = TextSourceKind.PdfTextLayer,
-                    ReadingOrder = 0,
-                    RequiresReview = true,
-                });
-                Console.WriteLine("  警告: OCR結果がないため、座標なしのPDF文字を要確認として使用します。");
-            }
-
-            reviewRequiredCount += pageBlocks.Count(b => b.RequiresReview);
-
-            var page = new DocumentPage
-            {
-                PageNumber = pageNumber,
-                OriginalImagePath = imagePath,
-                ProcessedImagePath = displayImagePath,
-                PreviewImagePath = displayImagePath,
-                Width = pageInfo.WidthPoints,
-                Height = pageInfo.HeightPoints,
-                WritingMode = WritingMode.Horizontal,
-                Status = pageBlocks.Count > 0 ? PageProcessingStatus.OcrCompleted : PageProcessingStatus.Error,
-            };
-            page.Blocks.AddRange(pageBlocks);
-
-            if (classifier is not null && pageBlocks.Count > 0)
-            {
-                try
-                {
-                    var changedCount = await classifier.ClassifyPageAsync(page);
-                    if (changedCount > 0)
-                    {
-                        Console.WriteLine($"  Ollamaにより{changedCount}件のブロック分類を更新しました。");
-                    }
-                }
-                catch (OllamaClassificationException ex)
-                {
-                    // 16章「Ollama応答不正」: 規則ベースの結果をそのまま使用し、処理を継続する。
-                    Console.WriteLine($"警告: Ollamaによる分類に失敗しました（{ex.Message}）。規則ベースの分類のまま続けます。");
-                }
-            }
-
-            if (corrector is not null && pageBlocks.Count > 0)
-            {
-                try
-                {
-                    var correctedCount = await corrector.CorrectPageAsync(page);
-                    if (correctedCount > 0)
-                    {
-                        Console.WriteLine($"  Ollamaにより{correctedCount}件のOCR文字列を校正しました。");
-                    }
-                }
-                catch (OllamaClassificationException ex)
-                {
-                    // OCR校正は補助機能であり、失敗してもOCR結果のまま処理を継続する。
-                    Console.WriteLine($"警告: OllamaによるOCR校正に失敗しました（{ex.Message}）。OCR結果のまま続けます。");
-                }
-            }
-
-            pages.Add(page);
-        }
-
-        if (reviewRequiredCount > 0)
-        {
-            Console.WriteLine($"{reviewRequiredCount} 件のブロックがOCR信頼度0.85未満のため要確認です。");
-        }
-
-        var pdfTextPageCount = pages.Count(page => page.Blocks.Any(block => block.TextSource == TextSourceKind.PdfTextLayer));
-        var ocrTextPageCount = pages.Count(page => page.Blocks.Any(block => block.TextSource == TextSourceKind.Ocr));
-        var noTextPageCount = pages.Count(page => page.Blocks.All(block => block.TextSource == TextSourceKind.Unknown));
-        Console.WriteLine($"文字情報の取得元: PDF {pdfTextPageCount}ページ / OCR {ocrTextPageCount}ページ / 文字なし {noTextPageCount}ページ");
-
-        var project = new EpubFabricProject
-        {
-            Id = Guid.NewGuid(),
-            Title = Path.GetFileNameWithoutExtension(inputPath),
-            SourcePdfPath = inputPath,
-            Pages = pages,
-        };
-
-        return (project, pages);
-    }
-    finally
-    {
-        ocrService?.Dispose();
-    }
-
-    // 固定レイアウトでは全テキスト行を座標付きのまま保持する。
-    // リフロー型ではレイアウト解析と段落統合を適用し、図ブロックの画像を切り出す。
-    List<PageBlock> BuildTextBlocks(int pageNumber, string imagePath, IReadOnlyList<TextLine> lines) =>
-        preserveAllTextLines
-            ? textLayerBlockBuilder.Build(pageNumber, lines)
-            : AnalyzeLayout(pageNumber, imagePath, lines);
-
-    List<PageBlock> AnalyzeLayout(int pageNumber, string imagePath, IReadOnlyList<TextLine> lines)
-    {
-        var textBounds = lines.Select(l => l.Bounds).ToList();
-        var regions = regionDetector.DetectRegions(imagePath, textBounds);
-        var blocks = paragraphMerger.Merge(layoutAnalyzer.AnalyzePage(pageNumber, lines, regions));
-
-        foreach (var figureBlock in blocks.Where(b => b.Type == BlockType.Figure))
-        {
-            var figureImagePath = Path.Combine(workDirectory, $"{figureBlock.Id}.png");
-            figureExtractor.Extract(imagePath, figureBlock.Bounds, figureImagePath);
-            figureBlock.ExtractedImagePath = figureImagePath;
-        }
-
-        return blocks;
-    }
+    return await new ConversionPipeline().BuildProjectAsync(options, new ConsoleProgress());
 }
 
 static (string? PositionalArg, Dictionary<string, string> Options) ParseOptions(string[] args)
@@ -614,7 +340,7 @@ static int ParseDpi(Dictionary<string, string> options) =>
 
 // 固定レイアウトのページ画像収録設定（12章）。既定はJPEG品質85・長辺2200px。
 // --max-image-size 0 で無制限（再圧縮もしない従来動作に近い挙動）を選べる。
-static PageImageOptions ParsePageImageOptions(Dictionary<string, string> options)
+static PageImageEncodingOptions ParsePageImageOptions(Dictionary<string, string> options)
 {
     var quality = 85;
     if (options.TryGetValue("--image-quality", out var qualityValue) && int.TryParse(qualityValue, out var parsedQuality))
@@ -628,7 +354,7 @@ static PageImageOptions ParsePageImageOptions(Dictionary<string, string> options
         maxSide = parsedSize;
     }
 
-    return new PageImageOptions(quality, maxSide);
+    return new PageImageEncodingOptions(quality, maxSide);
 }
 
 static OllamaOptions ParseOllamaOptions(Dictionary<string, string> options) => new(
@@ -666,10 +392,8 @@ static void PrintUsage()
 
 sealed record OllamaOptions(bool Enabled, string Endpoint, string Model);
 
-sealed record PageImageOptions(int JpegQuality, int MaxSideLength);
-
-enum OutputLayout
+/// <summary>パイプラインの進捗メッセージを、従来どおりの形式でコンソールへ流す。</summary>
+sealed class ConsoleProgress : IProgress<ConversionProgress>
 {
-    Fixed,
-    Reflow,
+    public void Report(ConversionProgress value) => Console.WriteLine(value.Message);
 }

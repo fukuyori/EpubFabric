@@ -13,6 +13,10 @@
     <EnableMsixTooling>true</EnableMsixTooling>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- アンパッケージ（exe直接実行）で動かすため、WinAppSDKランタイムを同梱する。
+         MSIXパッケージ配布へ切り替える場合はこの2行を外す。 -->
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
   </PropertyGroup>
 
   <ItemGroup>
@@ -65,6 +69,7 @@
     <ProjectReference Include="..\EpubFabric.Document\EpubFabric.Document.csproj" />
     <ProjectReference Include="..\EpubFabric.Epub\EpubFabric.Epub.csproj" />
     <ProjectReference Include="..\EpubFabric.Persistence\EpubFabric.Persistence.csproj" />
+    <ProjectReference Include="..\EpubFabric.Pipeline\EpubFabric.Pipeline.csproj" />
   </ItemGroup>
 
   <!--

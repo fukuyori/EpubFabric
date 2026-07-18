@@ -105,8 +105,9 @@ dotnet run --project src\EpubFabric.Cli -- export book.efproj --format epub
 
 ```
 src/
-  EpubFabric.Cli          コマンドライン（変換パイプラインのオーケストレーション）
-  EpubFabric.App          Windows GUI（WinAppSDK）
+  EpubFabric.Cli          コマンドライン（Pipelineの進捗をコンソールへ表示）
+  EpubFabric.App          Windows GUI（WinUI 3）: PDF選択→オプション→進捗表示付き変換
+  EpubFabric.Pipeline     変換パイプラインのオーケストレーション（CLI/GUI共用）
   EpubFabric.Core         データモデル・設定
   EpubFabric.Pdf          PDF読み込み・ラスタライズ・テキスト層抽出（Docnet/PDFium）
   EpubFabric.Ocr          OCR（RapidOcrNet / PP-OCRv6）・ゴミ行フィルタ・モデル管理

@@ -12,6 +12,7 @@
     <Project Path="src/EpubFabric.Ollama/EpubFabric.Ollama.csproj" />
     <Project Path="src/EpubFabric.Pdf/EpubFabric.Pdf.csproj" />
     <Project Path="src/EpubFabric.Persistence/EpubFabric.Persistence.csproj" />
+    <Project Path="src/EpubFabric.Pipeline/EpubFabric.Pipeline.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/EpubFabric.Tests/EpubFabric.Tests.csproj" />

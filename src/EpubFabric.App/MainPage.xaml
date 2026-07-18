@@ -8,11 +8,76 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <!--
-        This is the main content area of your application.
-        Add your UI elements here — for example, controls, layouts, and data-bound views.
-        Use 'dotnet new winui-page' to create additional pages and navigate to them via
-        the Frame in MainWindow (RootFrame).
-    -->
-    <Grid />
+    <Grid Padding="24" RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="PDF → EPUB 変換" Style="{StaticResource TitleTextBlockStyle}" />
+
+        <!-- 入力・出力 -->
+        <Grid Grid.Row="1" ColumnSpacing="8" RowSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="入力 PDF:" VerticalAlignment="Center" MinWidth="80" />
+            <TextBox x:Name="InputPathBox" Grid.Row="0" Grid.Column="1" IsReadOnly="True" PlaceholderText="変換する PDF を選択してください" />
+            <Button x:Name="PickInputButton" Grid.Row="0" Grid.Column="2" Content="選択..." Click="OnPickInputClick" />
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="出力 EPUB:" VerticalAlignment="Center" MinWidth="80" />
+            <TextBox x:Name="OutputPathBox" Grid.Row="1" Grid.Column="1" IsReadOnly="True" PlaceholderText="未指定なら入力と同じ場所に出力します" />
+            <Button x:Name="PickOutputButton" Grid.Row="1" Grid.Column="2" Content="選択..." Click="OnPickOutputClick" />
+        </Grid>
+
+        <!-- オプション -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="16">
+            <ComboBox x:Name="LayoutCombo" Header="レイアウト" SelectedIndex="0" MinWidth="160">
+                <ComboBoxItem Content="固定レイアウト" />
+                <ComboBoxItem Content="リフロー型" />
+            </ComboBox>
+            <NumberBox x:Name="DpiBox" Header="DPI" Value="300" Minimum="72" Maximum="600" SmallChange="50" SpinButtonPlacementMode="Compact" MinWidth="120" />
+            <CheckBox x:Name="EnhanceCheck" Content="紙面の高品質化" VerticalAlignment="Bottom" />
+            <CheckBox x:Name="OllamaCheck" Content="Ollama 分類・校正" VerticalAlignment="Bottom" Checked="OnOllamaCheckChanged" Unchecked="OnOllamaCheckChanged" />
+            <TextBox x:Name="OllamaModelBox" Header="Ollama モデル" Text="gemma4:12b" MinWidth="160" IsEnabled="False" />
+        </StackPanel>
+
+        <!-- 実行 -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="8">
+            <Button x:Name="ConvertButton" Content="変換開始" Style="{StaticResource AccentButtonStyle}" Click="OnConvertClick" IsEnabled="False" />
+            <Button x:Name="CancelButton" Content="キャンセル" Click="OnCancelClick" IsEnabled="False" />
+            <Button x:Name="OpenFolderButton" Content="出力フォルダを開く" Click="OnOpenFolderClick" IsEnabled="False" />
+        </StackPanel>
+
+        <!-- 進捗 -->
+        <StackPanel Grid.Row="4" Spacing="4">
+            <ProgressBar x:Name="ConvertProgressBar" Minimum="0" Maximum="100" Value="0" />
+            <TextBlock x:Name="StatusText" Text="PDF を選択すると変換を開始できます。" Style="{StaticResource CaptionTextBlockStyle}" />
+        </StackPanel>
+
+        <!-- ログ -->
+        <Border Grid.Row="5" BorderThickness="1" CornerRadius="4"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+            <ListView x:Name="LogList" SelectionMode="None" IsItemClickEnabled="False" Padding="8">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="MinHeight" Value="22" />
+                        <Setter Property="Padding" Value="4,0" />
+                    </Style>
+                </ListView.ItemContainerStyle>
+            </ListView>
+        </Border>
+    </Grid>
 </Page>
