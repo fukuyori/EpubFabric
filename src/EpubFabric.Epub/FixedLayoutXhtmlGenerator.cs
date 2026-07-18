@@ -82,22 +82,62 @@ public sealed class FixedLayoutXhtmlGenerator
         var height = Math.Max(1, ClampRatio(block.Bounds.Height) * pageHeight);
         var fontSize = Math.Max(1, height * 0.85);
 
-        var style = string.Join(
-            ";",
+        var styleParts = new List<string>
+        {
             $"left:{Number(left)}px",
             $"top:{Number(top)}px",
             $"width:{Number(width)}px",
             $"height:{Number(height)}px",
-            $"font-size:{Number(fontSize)}px");
+            $"font-size:{Number(fontSize)}px",
+        };
+
+        // グリフ列の描画幅はリーダーのフォント次第で「文字数×font-size」前後になり、
+        // 紙面上の実際の行幅とずれる（行の後半ほど選択・検索ハイライトが右へはみ出す）。
+        // OCRmyPDFのTz（水平スケール）と同じ発想で、推定自然幅→枠幅のscaleXを掛けて
+        // 行の先頭と末尾の両方を紙面に合わせる。
+        var naturalWidth = EstimateNaturalTextWidth(text) * fontSize;
+        if (naturalWidth > 0)
+        {
+            var scaleX = Math.Clamp(width / naturalWidth, 0.5, 2.0);
+            if (Math.Abs(scaleX - 1.0) > 0.02)
+            {
+                styleParts.Add($"transform:scaleX({Number(scaleX)})");
+            }
+        }
 
         return new XElement(
             Xhtml + "span",
             new XAttribute("id", block.Id),
             new XAttribute("class", $"positioned-text block-{block.Type.ToString().ToLowerInvariant()}"),
             new XAttribute("data-text-source", TextSourceName(block.TextSource)),
-            new XAttribute("style", style),
+            new XAttribute("style", string.Join(";", styleParts)),
             text);
     }
+
+    /// <summary>
+    /// テキストの自然描画幅をem単位で見積もる。全角（CJK・かな・全角記号）は1em、
+    /// 半角（ASCII・半角カナ）は0.5emとする近似。正確なフォントメトリクスは
+    /// リーダーごとに異なるため、scaleXの分母として使える程度の精度でよい。
+    /// </summary>
+    private static double EstimateNaturalTextWidth(string text)
+    {
+        var width = 0.0;
+        foreach (var ch in text)
+        {
+            width += IsFullWidth(ch) ? 1.0 : 0.5;
+        }
+
+        return width;
+    }
+
+    private static bool IsFullWidth(char c) =>
+        c is (>= 'ᄀ' and <= 'ᅟ')   // ハングル字母
+            or (>= '⺀' and <= '꓏') // CJK部首・かな・CJK統合漢字・拡張A
+            or (>= '가' and <= '힣') // ハングル音節
+            or (>= '豈' and <= '﫿') // CJK互換漢字
+            or (>= '︰' and <= '﹏') // CJK互換形
+            or (>= '＀' and <= '｠') // 全角英数・記号
+            or (>= '￠' and <= '￦'); // 全角記号
 
     private static double ClampRatio(double value) => Math.Clamp(value, 0, 1);
 
