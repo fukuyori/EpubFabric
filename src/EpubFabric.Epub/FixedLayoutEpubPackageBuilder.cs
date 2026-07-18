@@ -199,11 +199,20 @@ public sealed class FixedLayoutEpubPackageBuilder
                 new XAttribute("id", pageId),
                 new XAttribute("href", $"text/{pages[i].XhtmlFileName}"),
                 new XAttribute("media-type", "application/xhtml+xml")));
-            manifestItems.Add(new XElement(
+
+            var imageItem = new XElement(
                 Opf + "item",
                 new XAttribute("id", imageId),
                 new XAttribute("href", $"images/{pages[i].ImageFileName}"),
-                new XAttribute("media-type", ImageMediaType(pages[i].ImageFileName))));
+                new XAttribute("media-type", ImageMediaType(pages[i].ImageFileName)));
+
+            // 1ページ目の画像を表紙として宣言する（リーダーの書棚サムネイル等に使われる）。
+            if (i == 0)
+            {
+                imageItem.Add(new XAttribute("properties", "cover-image"));
+            }
+
+            manifestItems.Add(imageItem);
             spineItems.Add(new XElement(Opf + "itemref", new XAttribute("idref", pageId)));
         }
 
@@ -215,7 +224,9 @@ public sealed class FixedLayoutEpubPackageBuilder
             new XElement(Dc + "language", project.Language),
             new XElement(Opf + "meta", new XAttribute("property", "rendition:layout"), "pre-paginated"),
             new XElement(Opf + "meta", new XAttribute("property", "rendition:orientation"), "auto"),
-            new XElement(Opf + "meta", new XAttribute("property", "rendition:spread"), "auto"));
+            new XElement(Opf + "meta", new XAttribute("property", "rendition:spread"), "auto"),
+            // EPUB 2世代のリーダー・書棚アプリ向けの表紙互換表記。
+            new XElement(Opf + "meta", new XAttribute("name", "cover"), new XAttribute("content", "page-image-0001")));
 
         if (!string.IsNullOrWhiteSpace(project.Author))
         {
@@ -243,7 +254,10 @@ public sealed class FixedLayoutEpubPackageBuilder
                 new XElement(Opf + "manifest", manifestItems),
                 new XElement(
                     Opf + "spine",
-                    new XAttribute("page-progression-direction", "ltr"),
+                    // 縦書き（右綴じ）ではページを右から左へめくる。
+                    new XAttribute(
+                        "page-progression-direction",
+                        project.WritingMode == WritingMode.Vertical ? "rtl" : "ltr"),
                     spineItems)));
     }
 

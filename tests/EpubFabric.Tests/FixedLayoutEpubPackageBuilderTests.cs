@@ -137,6 +137,48 @@ public class FixedLayoutEpubPackageBuilderTests
     }
 
     [Fact]
+    public void Build_VerticalWritingProject_UsesRightToLeftPageProgression()
+    {
+        var tempDirectory = Path.Combine(Path.GetTempPath(), $"epubfabric-fixed-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDirectory);
+        var imagePath = Path.Combine(tempDirectory, "source.png");
+        File.WriteAllBytes(imagePath, OnePixelPng);
+
+        var page = new DocumentPage
+        {
+            PageNumber = 1,
+            OriginalImagePath = imagePath,
+            ProcessedImagePath = imagePath,
+            PreviewImagePath = imagePath,
+            Width = 612,
+            Height = 792,
+            WritingMode = WritingMode.Vertical,
+        };
+        var project = new EpubFabricProject
+        {
+            Id = Guid.NewGuid(),
+            Title = "縦書き試験",
+            SourcePdfPath = "source.pdf",
+            WritingMode = WritingMode.Vertical,
+            Pages = [page],
+        };
+        var outputPath = Path.Combine(tempDirectory, "book.epub");
+
+        try
+        {
+            new FixedLayoutEpubPackageBuilder().Build(project, outputPath);
+
+            using var zip = ZipFile.OpenRead(outputPath);
+            var package = ReadEntry(zip, "EPUB/package.opf");
+            Assert.Contains("page-progression-direction=\"rtl\"", package);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Build_WritesOneFixedLayoutDocumentAndImagePerPdfPage()
     {
         var tempDirectory = Path.Combine(Path.GetTempPath(), $"epubfabric-fixed-test-{Guid.NewGuid():N}");
@@ -189,6 +231,11 @@ public class FixedLayoutEpubPackageBuilderTests
             var package = ReadEntry(zip, "EPUB/package.opf");
             Assert.Contains("<meta property=\"rendition:layout\">pre-paginated</meta>", package);
             Assert.Contains("page-progression-direction=\"ltr\"", package);
+
+            // 1ページ目の画像が表紙として宣言される（EPUB 3のcover-image + EPUB 2互換meta）。
+            Assert.Contains("id=\"page-image-0001\"", package);
+            Assert.Contains("properties=\"cover-image\"", package);
+            Assert.Contains("<meta name=\"cover\" content=\"page-image-0001\" />", package);
 
             var xhtml = ReadEntry(zip, "EPUB/text/page-0001.xhtml");
             Assert.Contains("content=\"width=612, height=792\"", xhtml);

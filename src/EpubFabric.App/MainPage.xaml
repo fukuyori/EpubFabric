@@ -49,6 +49,7 @@
             </ComboBox>
             <NumberBox x:Name="DpiBox" Header="DPI" Value="300" Minimum="72" Maximum="600" SmallChange="50" SpinButtonPlacementMode="Compact" MinWidth="120" />
             <CheckBox x:Name="EnhanceCheck" Content="紙面の高品質化" VerticalAlignment="Bottom" />
+            <CheckBox x:Name="VerticalCheck" Content="縦書き（右綴じ）" VerticalAlignment="Bottom" />
             <CheckBox x:Name="OllamaCheck" Content="Ollama 分類・校正" VerticalAlignment="Bottom" Checked="OnOllamaCheckChanged" Unchecked="OnOllamaCheckChanged" />
             <TextBox x:Name="OllamaModelBox" Header="Ollama モデル" Text="gemma4:12b" MinWidth="160" IsEnabled="False" />
         </StackPanel>

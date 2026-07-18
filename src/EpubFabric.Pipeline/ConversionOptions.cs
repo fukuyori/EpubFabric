@@ -29,6 +29,9 @@ public sealed record ConversionOptions
     /// <summary>ページ画像の高品質化（紙色正規化・裏写り抑制）。</summary>
     public bool EnhancePages { get; init; }
 
+    /// <summary>縦書き（右綴じ）の書籍か。trueで page-progression-direction が rtl になる。</summary>
+    public bool VerticalWriting { get; init; }
+
     public OllamaPipelineOptions? Ollama { get; init; }
 }
 

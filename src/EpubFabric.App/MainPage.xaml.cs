@@ -92,6 +92,7 @@ public sealed partial class MainPage : Page
             Dpi = double.IsNaN(DpiBox.Value) ? 300 : (int)DpiBox.Value,
             PreserveAllTextLines = layout == OutputLayout.Fixed,
             EnhancePages = EnhanceCheck.IsChecked == true,
+            VerticalWriting = VerticalCheck.IsChecked == true,
             Ollama = OllamaCheck.IsChecked == true
                 ? new OllamaPipelineOptions("http://localhost:11434", OllamaModelBox.Text.Trim())
                 : null,
@@ -177,6 +178,7 @@ public sealed partial class MainPage : Page
         LayoutCombo.IsEnabled = !running;
         DpiBox.IsEnabled = !running;
         EnhanceCheck.IsEnabled = !running;
+        VerticalCheck.IsEnabled = !running;
         OllamaCheck.IsEnabled = !running;
         OllamaModelBox.IsEnabled = !running && OllamaCheck.IsChecked == true;
     }

@@ -219,7 +219,7 @@ public sealed class ConversionPipeline
                     PreviewImagePath = displayImagePath,
                     Width = pageInfo.WidthPoints,
                     Height = pageInfo.HeightPoints,
-                    WritingMode = WritingMode.Horizontal,
+                    WritingMode = options.VerticalWriting ? WritingMode.Vertical : WritingMode.Horizontal,
                     Status = pageBlocks.Count > 0 ? PageProcessingStatus.OcrCompleted : PageProcessingStatus.Error,
                 };
                 page.Blocks.AddRange(pageBlocks);
@@ -276,6 +276,7 @@ public sealed class ConversionPipeline
                 Id = Guid.NewGuid(),
                 Title = Path.GetFileNameWithoutExtension(options.InputPath),
                 SourcePdfPath = options.InputPath,
+                WritingMode = options.VerticalWriting ? WritingMode.Vertical : WritingMode.Horizontal,
                 Pages = pages,
             };
 

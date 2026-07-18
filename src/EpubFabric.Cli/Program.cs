@@ -71,7 +71,8 @@ static async Task<int> RunConvert(string[] args)
         dpi,
         ollamaOptions,
         preserveAllTextLines: layout == OutputLayout.Fixed,
-        enhancePages: options.ContainsKey("--enhance"));
+        enhancePages: options.ContainsKey("--enhance"),
+        verticalWriting: options.ContainsKey("--vertical"));
 
     BuildEpub(project, layout, outputPath, ParsePageImageOptions(options));
 
@@ -179,7 +180,8 @@ static async Task<int> RunAnalyze(string[] args)
         dpi,
         ollamaOptions,
         preserveAllTextLines: true,
-        enhancePages: options.ContainsKey("--enhance"));
+        enhancePages: options.ContainsKey("--enhance"),
+        verticalWriting: options.ContainsKey("--vertical"));
 
     new EfprojStore().Save(project, projectDirectory);
 
@@ -294,7 +296,8 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
     int dpi,
     OllamaOptions? ollamaOptions = null,
     bool preserveAllTextLines = true,
-    bool enhancePages = false)
+    bool enhancePages = false,
+    bool verticalWriting = false)
 {
     var options = new ConversionOptions
     {
@@ -303,6 +306,7 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
         Dpi = dpi,
         PreserveAllTextLines = preserveAllTextLines,
         EnhancePages = enhancePages,
+        VerticalWriting = verticalWriting,
         Ollama = ollamaOptions is { Enabled: true }
             ? new OllamaPipelineOptions(ollamaOptions.Endpoint, ollamaOptions.Model)
             : null,
@@ -377,7 +381,7 @@ static void PrintUsage()
 {
     Console.WriteLine("使い方:");
     Console.WriteLine("  epubfabric info <input.pdf>");
-    Console.WriteLine("  epubfabric convert <input.pdf> [--output <output.epub>] [--layout <fixed|reflow>] [--dpi <dpi>] [--enhance] [--image-quality <1-100>] [--max-image-size <px>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
+    Console.WriteLine("  epubfabric convert <input.pdf> [--output <output.epub>] [--layout <fixed|reflow>] [--dpi <dpi>] [--enhance] [--vertical] [--image-quality <1-100>] [--max-image-size <px>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric evaluate <input.pdf> [--report <report-dir>] [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric analyze <input.pdf> --project <book.efproj> [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric export <book.efproj> --format epub [--output <output.epub>] [--layout <fixed|reflow>] [--image-quality <1-100>] [--max-image-size <px>]");
@@ -386,6 +390,8 @@ static void PrintUsage()
     Console.WriteLine("  evaluate はEPUBを生成せず、ページ画像+検出ブロックと生成されるEPUB断片を左右対照したHTMLレポート（index.html）と定量メトリクス（metrics.json）を出力します。");
     Console.WriteLine("  固定レイアウトのページ画像はJPEG品質85・長辺2200pxへ再圧縮して収録します（--image-quality / --max-image-size で変更、--max-image-size 0 で縮小なし）。");
     Console.WriteLine("  --enhance を指定すると、スキャン紙面を高品質化（紙色の白色正規化・コントラスト補正・裏写り抑制）してEPUB収録・OCRに使います。");
+    Console.WriteLine("  --vertical を指定すると縦書き（右綴じ）として、ページを右から左へめくる設定（page-progression-direction: rtl）で出力します。");
+    Console.WriteLine("  1ページ目の画像は表紙（cover-image）として設定されます。");
     Console.WriteLine("  --ollama を指定すると、Ollamaによる意味分類（見出し・本文などの補正）とOCR文字列の校正を行います（既定では無効）。");
     Console.WriteLine("  --ollama-model の既定値: gemma4:12b / --ollama-endpoint の既定値: http://localhost:11434");
 }
