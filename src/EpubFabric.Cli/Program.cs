@@ -69,7 +69,8 @@ static async Task<int> RunConvert(string[] args)
         workDirectory,
         dpi,
         ollamaOptions,
-        preserveAllTextLines: layout == OutputLayout.Fixed);
+        preserveAllTextLines: layout == OutputLayout.Fixed,
+        enhancePages: options.ContainsKey("--enhance"));
 
     BuildEpub(project, layout, outputPath, ParsePageImageOptions(options));
 
@@ -98,7 +99,8 @@ static async Task<int> RunEvaluate(string[] args)
         workDirectory,
         dpi,
         ollamaOptions,
-        preserveAllTextLines: false);
+        preserveAllTextLines: false,
+        enhancePages: options.ContainsKey("--enhance"));
 
     var blocksById = pages.SelectMany(p => p.Blocks).ToDictionary(b => b.Id);
     var summary = new LayoutEvaluator().Evaluate(pages);
@@ -175,7 +177,8 @@ static async Task<int> RunAnalyze(string[] args)
         workDirectory,
         dpi,
         ollamaOptions,
-        preserveAllTextLines: true);
+        preserveAllTextLines: true,
+        enhancePages: options.ContainsKey("--enhance"));
 
     new EfprojStore().Save(project, projectDirectory);
 
@@ -299,7 +302,8 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
     string workDirectory,
     int dpi,
     OllamaOptions? ollamaOptions = null,
-    bool preserveAllTextLines = true)
+    bool preserveAllTextLines = true,
+    bool enhancePages = false)
 {
     var pdfService = new PdfDocumentService();
     var textLayerEvaluator = new PdfTextLayerQualityEvaluator();
@@ -309,7 +313,13 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
     var regionDetector = new NonTextRegionDetector();
     var figureExtractor = new FigureImageExtractor();
     var ocrPreprocessor = new OcrImagePreprocessor();
+    var pageEnhancer = enhancePages ? new PageImageEnhancer() : null;
     var info = pdfService.GetInfo(inputPath);
+
+    if (enhancePages)
+    {
+        Console.WriteLine("ページ画像の高品質化（紙色正規化・裏写り抑制）を行います。");
+    }
 
     PageBlockClassifier? classifier = null;
     OcrTextCorrector? corrector = null;
@@ -357,6 +367,28 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
             var imagePath = Path.Combine(workDirectory, $"page-original-{pageNumber:0000}.png");
             pdfService.RenderPageToPng(inputPath, pageNumber, imagePath, dpi);
 
+            // 高品質化（--enhance）: 紙色正規化・裏写り抑制を適用した画像を、表示（EPUB収録）と
+            // OCR入力の両方に使う。幾何変換を含まないため座標には影響しない。
+            var displayImagePath = imagePath;
+            if (pageEnhancer is not null)
+            {
+                try
+                {
+                    var enhanceResult = pageEnhancer.Enhance(
+                        imagePath,
+                        Path.Combine(workDirectory, $"page-enhanced-{pageNumber:0000}.png"));
+                    if (enhanceResult.Applied)
+                    {
+                        displayImagePath = enhanceResult.ImagePath;
+                        Console.WriteLine($"  紙面を高品質化しました（紙{enhanceResult.PaperLuminance:0}・インク{enhanceResult.InkLuminance:0}）。");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"警告: 高品質化に失敗しました（{ex.Message}）。元画像を使用します。");
+                }
+            }
+
             var pageInfo = info.Pages[i];
             var pageBlocks = new List<PageBlock>();
             string? fallbackPdfText = null;
@@ -370,7 +402,7 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
 
                 if (assessment.IsUsable)
                 {
-                    pageBlocks = BuildTextBlocks(pageNumber, imagePath, textLines);
+                    pageBlocks = BuildTextBlocks(pageNumber, displayImagePath, textLines);
                 }
                 else
                 {
@@ -380,8 +412,6 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
                 }
             }
 
-            var processedImagePath = imagePath;
-
             if (requiresOcr && !ocrUnavailable)
             {
                 try
@@ -389,17 +419,18 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
                     ocrService ??= new PageOcrService();
                     await ocrService.InitializeAsync(new OcrModelProvisioner());
 
-                    // 9.3 前処理: 傾きを補正した画像でOCRし、座標は元画像の座標系へ戻す。
-                    // 表示・EPUB出力には元画像をそのまま使う（原型保証）。
+                    // 9.3 前処理: 傾きを補正した画像でOCRし、座標は表示画像の座標系へ戻す。
+                    // 傾き補正済み画像はOCR専用で、表示・EPUB出力には使わない（原型保証）。
+                    var ocrInputPath = displayImagePath;
                     OcrPreprocessResult? preprocess = null;
                     try
                     {
                         preprocess = ocrPreprocessor.Preprocess(
-                            imagePath,
-                            Path.Combine(workDirectory, $"page-processed-{pageNumber:0000}.png"));
+                            displayImagePath,
+                            Path.Combine(workDirectory, $"page-deskewed-{pageNumber:0000}.png"));
                         if (preprocess.DeskewApplied)
                         {
-                            processedImagePath = preprocess.ImagePathForOcr;
+                            ocrInputPath = preprocess.ImagePathForOcr;
                             Console.WriteLine($"  傾き{preprocess.SkewAngleDegrees:+0.0;-0.0}°を補正した画像でOCRします。");
                         }
                     }
@@ -409,7 +440,7 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
                         Console.WriteLine($"警告: OCR前処理に失敗しました（{ex.Message}）。元画像でOCRします。");
                     }
 
-                    var ocrResult = ocrService.RecognizePage(processedImagePath);
+                    var ocrResult = ocrService.RecognizePage(ocrInputPath);
                     var ocrLines = ocrResult.Lines;
 
                     if (preprocess is { DeskewApplied: true })
@@ -424,7 +455,7 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
                         Console.WriteLine($"  低信頼のOCRゴミ行{ocrResult.DroppedLineCount}件を除外しました。");
                     }
 
-                    pageBlocks = BuildTextBlocks(pageNumber, imagePath, ocrLines);
+                    pageBlocks = BuildTextBlocks(pageNumber, displayImagePath, ocrLines);
                 }
                 catch (Exception ex) when (ex is OcrModelDownloadException or InvalidOperationException)
                 {
@@ -459,8 +490,8 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
             {
                 PageNumber = pageNumber,
                 OriginalImagePath = imagePath,
-                ProcessedImagePath = processedImagePath,
-                PreviewImagePath = imagePath,
+                ProcessedImagePath = displayImagePath,
+                PreviewImagePath = displayImagePath,
                 Width = pageInfo.WidthPoints,
                 Height = pageInfo.HeightPoints,
                 WritingMode = WritingMode.Horizontal,
@@ -620,7 +651,7 @@ static void PrintUsage()
 {
     Console.WriteLine("使い方:");
     Console.WriteLine("  epubfabric info <input.pdf>");
-    Console.WriteLine("  epubfabric convert <input.pdf> [--output <output.epub>] [--layout <fixed|reflow>] [--dpi <dpi>] [--image-quality <1-100>] [--max-image-size <px>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
+    Console.WriteLine("  epubfabric convert <input.pdf> [--output <output.epub>] [--layout <fixed|reflow>] [--dpi <dpi>] [--enhance] [--image-quality <1-100>] [--max-image-size <px>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric evaluate <input.pdf> [--report <report-dir>] [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric analyze <input.pdf> --project <book.efproj> [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric export <book.efproj> --format epub [--output <output.epub>] [--layout <fixed|reflow>] [--image-quality <1-100>] [--max-image-size <px>]");
@@ -628,6 +659,7 @@ static void PrintUsage()
     Console.WriteLine("  convert/export は固定レイアウトEPUBを生成します。従来のリフロー型は --layout reflow で選択できます。");
     Console.WriteLine("  evaluate はEPUBを生成せず、ページ画像+検出ブロックと生成されるEPUB断片を左右対照したHTMLレポート（index.html）と定量メトリクス（metrics.json）を出力します。");
     Console.WriteLine("  固定レイアウトのページ画像はJPEG品質85・長辺2200pxへ再圧縮して収録します（--image-quality / --max-image-size で変更、--max-image-size 0 で縮小なし）。");
+    Console.WriteLine("  --enhance を指定すると、スキャン紙面を高品質化（紙色の白色正規化・コントラスト補正・裏写り抑制）してEPUB収録・OCRに使います。");
     Console.WriteLine("  --ollama を指定すると、Ollamaによる意味分類（見出し・本文などの補正）とOCR文字列の校正を行います（既定では無効）。");
     Console.WriteLine("  --ollama-model の既定値: gemma4:12b / --ollama-endpoint の既定値: http://localhost:11434");
 }

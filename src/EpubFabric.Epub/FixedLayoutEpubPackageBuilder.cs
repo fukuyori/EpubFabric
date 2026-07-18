@@ -101,12 +101,15 @@ public sealed class FixedLayoutEpubPackageBuilder
     private static string XhtmlFileName(int index) => $"page-{index + 1:0000}.xhtml";
 
     /// <summary>
-    /// ページ画像の収録形態を決める。長辺が上限を超える場合は縮小してJPEG化、
+    /// ページ画像の収録形態を決める。表示には補正済み画像（--enhance適用時の高品質化画像。
+    /// 無指定時は元画像と同一パス）を優先する。長辺が上限を超える場合は縮小してJPEG化、
     /// 上限内でも大きなPNGはJPEG化、それ以外（小さな画像・既存JPEG等）はそのまま収録する。
     /// </summary>
     private PageResource PrepareImage(DocumentPage page, int index)
     {
-        var sourcePath = page.OriginalImagePath;
+        var sourcePath = !string.IsNullOrEmpty(page.ProcessedImagePath) && File.Exists(page.ProcessedImagePath)
+            ? page.ProcessedImagePath
+            : page.OriginalImagePath;
         var extension = Path.GetExtension(sourcePath).ToLowerInvariant();
         if (extension is not ".png" and not ".jpg" and not ".jpeg" and not ".webp")
         {
