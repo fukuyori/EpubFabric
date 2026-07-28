@@ -19,48 +19,96 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" Text="PDF → EPUB 変換" Style="{StaticResource TitleTextBlockStyle}" />
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12">
+            <TextBlock Text="PDF → EPUB 変換" Style="{StaticResource TitleTextBlockStyle}" />
+            <TextBlock x:Name="VersionText" VerticalAlignment="Bottom" Margin="0,0,0,4"
+                       Style="{StaticResource CaptionTextBlockStyle}"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        </StackPanel>
 
-        <!-- 入力・出力 -->
-        <Grid Grid.Row="1" ColumnSpacing="8" RowSpacing="8">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
+        <!-- 変換するPDFの一覧。ドラッグ＆ドロップで1件ずつ積み上げられる。 -->
+        <Grid Grid.Row="1" RowSpacing="8">
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <TextBlock Grid.Row="0" Grid.Column="0" Text="入力 PDF:" VerticalAlignment="Center" MinWidth="80" />
-            <TextBox x:Name="InputPathBox" Grid.Row="0" Grid.Column="1" IsReadOnly="True" PlaceholderText="変換する PDF を選択してください" />
-            <Button x:Name="PickInputButton" Grid.Row="0" Grid.Column="2" Content="選択..." Click="OnPickInputClick" />
+            <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <TextBlock x:Name="FileCountText" Text="変換する PDF（0 件）" VerticalAlignment="Center" />
+                <Button x:Name="PickInputButton" Content="追加..." Click="OnPickInputClick" />
+                <Button x:Name="RemoveInputButton" Content="選択項目を削除" Click="OnRemoveInputClick" IsEnabled="False" />
+                <Button x:Name="ClearInputButton" Content="すべて削除" Click="OnClearInputClick" IsEnabled="False" />
+            </StackPanel>
 
-            <TextBlock Grid.Row="1" Grid.Column="0" Text="出力 EPUB:" VerticalAlignment="Center" MinWidth="80" />
-            <TextBox x:Name="OutputPathBox" Grid.Row="1" Grid.Column="1" IsReadOnly="True" PlaceholderText="未指定なら入力と同じ場所に出力します" />
-            <Button x:Name="PickOutputButton" Grid.Row="1" Grid.Column="2" Content="選択..." Click="OnPickOutputClick" />
+            <Border Grid.Row="1" BorderThickness="1" CornerRadius="4" MinHeight="120" MaxHeight="200"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                <ListView x:Name="FileList" SelectionMode="Extended" Padding="4"
+                          SelectionChanged="OnFileSelectionChanged">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:ConversionItem">
+                            <Grid ColumnSpacing="12" Padding="4,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="{x:Bind Name}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{x:Bind Location}" TextTrimming="CharacterEllipsis"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="1" Text="{x:Bind Status, Mode=OneWay}" VerticalAlignment="Center"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </Border>
+
+            <Grid Grid.Row="2" ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="出力フォルダー:" VerticalAlignment="Center" MinWidth="100" />
+                <TextBox x:Name="OutputPathBox" Grid.Column="1" IsReadOnly="True"
+                         PlaceholderText="未指定なら各 PDF と同じ場所に「入力名.epub」を出力します" />
+                <Button x:Name="PickOutputButton" Grid.Column="2" Content="選択..." Click="OnPickOutputClick" />
+            </Grid>
         </Grid>
 
-        <!-- オプション -->
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="16">
-            <ComboBox x:Name="LayoutCombo" Header="レイアウト" SelectedIndex="0" MinWidth="160">
-                <ComboBoxItem Content="固定レイアウト" />
-                <ComboBoxItem Content="リフロー型" />
-            </ComboBox>
-            <NumberBox x:Name="DpiBox" Header="DPI" Value="300" Minimum="72" Maximum="600" SmallChange="50" SpinButtonPlacementMode="Compact" MinWidth="120" />
-            <NumberBox x:Name="MaxPagesBox" Header="ページ数上限（0=全）" Value="0" Minimum="0" SpinButtonPlacementMode="Compact" MinWidth="140" />
-            <ComboBox x:Name="WritingModeCombo" Header="書字方向" SelectedIndex="0" MinWidth="150">
-                <ComboBoxItem Content="自動判定" />
-                <ComboBoxItem Content="横書き（左綴じ）" />
-                <ComboBoxItem Content="縦書き（右綴じ）" />
-            </ComboBox>
-            <CheckBox x:Name="EnhanceCheck" Content="紙面の高品質化" VerticalAlignment="Bottom" />
-            <CheckBox x:Name="ForceOcrCheck" Content="常にOCR（テキスト層を無視）" VerticalAlignment="Bottom" />
-            <CheckBox x:Name="CoverImageCheck" Content="表紙をページ画像で収録（リフロー時）" VerticalAlignment="Bottom" />
-            <CheckBox x:Name="OllamaCheck" Content="Ollama 分類・校正" VerticalAlignment="Bottom" Checked="OnOllamaCheckChanged" Unchecked="OnOllamaCheckChanged" />
-            <TextBox x:Name="OllamaModelBox" Header="Ollama モデル" Text="gemma4:12b" MinWidth="160" IsEnabled="False" />
-        </StackPanel>
+        <!-- オプション。1行に並べるとウィンドウ幅に収まらず右端が隠れるため、
+             設定値の入力とチェックボックスを2行に分ける。ウィンドウをさらに狭めても
+             操作できるよう、横スクロールを許す。 -->
+        <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                      HorizontalScrollMode="Auto" VerticalScrollMode="Disabled">
+            <StackPanel Spacing="12">
+                <StackPanel Orientation="Horizontal" Spacing="16">
+                    <ComboBox x:Name="LayoutCombo" Header="レイアウト" SelectedIndex="0" MinWidth="160">
+                        <ComboBoxItem Content="固定レイアウト" />
+                        <ComboBoxItem Content="リフロー型" />
+                    </ComboBox>
+                    <NumberBox x:Name="DpiBox" Header="DPI" Value="300" Minimum="72" Maximum="600" SmallChange="50" SpinButtonPlacementMode="Compact" MinWidth="120" />
+                    <NumberBox x:Name="MaxPagesBox" Header="ページ数上限（0=全）" Value="0" Minimum="0" SpinButtonPlacementMode="Compact" MinWidth="140" />
+                    <ComboBox x:Name="WritingModeCombo" Header="書字方向" SelectedIndex="0" MinWidth="150">
+                        <ComboBoxItem Content="自動判定" />
+                        <ComboBoxItem Content="横書き（左綴じ）" />
+                        <ComboBoxItem Content="縦書き（右綴じ）" />
+                    </ComboBox>
+                    <TextBox x:Name="OllamaModelBox" Header="Ollama モデル" Text="gemma4:12b" MinWidth="160" IsEnabled="False" />
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Spacing="16">
+                    <CheckBox x:Name="EnhanceCheck" Content="紙面の高品質化" />
+                    <CheckBox x:Name="ForceOcrCheck" Content="常にOCR（テキスト層を無視）" />
+                    <CheckBox x:Name="CoverImageCheck" Content="表紙をページ画像で収録（リフロー時）" />
+                    <CheckBox x:Name="OllamaCheck" Content="Ollama 分類・校正" Checked="OnOllamaCheckChanged" Unchecked="OnOllamaCheckChanged" />
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
 
         <!-- 実行 -->
         <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="8">

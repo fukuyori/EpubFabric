@@ -89,7 +89,7 @@ cd EpubFabric
 
 ```powershell
 .\scripts\publish.ps1
-# → publish\installer\EpubFabric-Setup-0.2.2.exe
+# → publish\installer\EpubFabric-Setup-0.2.3.exe
 
 # バージョンを明示する場合（既定は Directory.Build.props の <Version>）
 .\scripts\publish.ps1 -Version 1.0.0
@@ -118,6 +118,9 @@ dotnet run --project src\EpubFabric.Cli -- info input.pdf
 
 # 固定レイアウトEPUB生成（既定）
 dotnet run --project src\EpubFabric.Cli -- convert input.pdf --output book.epub
+
+# 複数のPDFを連続変換（--output は出力フォルダー。未指定なら各PDFと同じ場所）
+dotnet run --project src\EpubFabric.Cli -- convert a.pdf b.pdf c.pdf --output out-dir
 
 # リフロー型EPUB生成
 dotnet run --project src\EpubFabric.Cli -- convert input.pdf --layout reflow
@@ -160,7 +163,12 @@ dotnet run --project src\EpubFabric.Cli -- export book.efproj --format epub
 
 ## 使い方（GUI）
 
-WinUI 3 のデスクトップアプリ（`EpubFabric.App`）から、PDF 選択→オプション設定→進捗表示付き変換が行えます。インストーラーでインストールした場合は、スタートメニューの「EpubFabric」（またはデスクトップアイコン）から起動します。
+WinUI 3 のデスクトップアプリ（`EpubFabric.App`）から、PDF の一覧を作って順に変換できます。
+
+- 「追加...」で複数選択、またはウィンドウへドラッグ＆ドロップして一覧に積みます。**1 件ずつ落として追加していけます**
+- 一覧には各ファイルの状態（待機中／変換中／完了／失敗）が出ます。「選択項目を削除」「すべて削除」で編集できます
+- 出力先は「出力フォルダー」で指定します。未指定なら各 PDF と同じ場所に `入力名.epub` を作ります
+- 1 件が失敗しても残りの変換は続行し、最後に成功・失敗の件数を表示しますインストーラーでインストールした場合は、スタートメニューの「EpubFabric」（またはデスクトップアイコン）から起動します。
 
 開発時の起動:
 

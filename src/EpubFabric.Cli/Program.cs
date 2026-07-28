@@ -50,37 +50,88 @@ static int Unknown()
 
 static async Task<int> RunConvert(string[] args)
 {
-    var (inputPath, options) = ParseOptions(args);
-    if (inputPath is null || !RequireExistingFile(inputPath))
+    var (inputPaths, options) = ParseOptionsMulti(args);
+    if (inputPaths.Count == 0)
     {
+        Console.Error.WriteLine("エラー: 変換する PDF を指定してください。");
         return 1;
     }
 
-    var outputPath = options.GetValueOrDefault("--output") ?? Path.ChangeExtension(inputPath, ".epub");
-    var dpi = ParseDpi(options);
-    var ollamaOptions = ParseOllamaOptions(options);
+    foreach (var path in inputPaths)
+    {
+        if (!RequireExistingFile(path))
+        {
+            return 1;
+        }
+    }
+
     if (!TryParseLayout(options, out var layout))
     {
         return 1;
     }
 
-    var workDirectory = Path.Combine(Path.GetTempPath(), $"epubfabric-{Guid.NewGuid():N}");
-    var (project, _) = await BuildProjectFromPdf(
-        inputPath,
-        workDirectory,
-        dpi,
-        ollamaOptions,
-        preserveAllTextLines: layout == OutputLayout.Fixed,
-        enhancePages: options.ContainsKey("--enhance"),
-        writingMode: ParseWritingMode(options),
-        forceOcr: options.ContainsKey("--force-ocr"),
-        language: options.GetValueOrDefault("--language"),
-        maxPages: ParseMaxPages(options));
+    var output = options.GetValueOrDefault("--output");
+    if (inputPaths.Count > 1 && output is not null && !Directory.Exists(output))
+    {
+        Console.Error.WriteLine($"エラー: 複数のPDFを変換する場合、--output には既存のフォルダーを指定してください: {output}");
+        return 1;
+    }
 
-    BuildEpub(project, layout, outputPath, ParsePageImageOptions(options), options.ContainsKey("--cover-image"));
+    var dpi = ParseDpi(options);
+    var ollamaOptions = ParseOllamaOptions(options);
+    var imageOptions = ParsePageImageOptions(options);
+    var coverImage = options.ContainsKey("--cover-image");
+    var failed = 0;
 
-    Console.WriteLine($"{LayoutLabel(layout)}EPUBを生成しました: {outputPath}");
-    return 0;
+    for (var i = 0; i < inputPaths.Count; i++)
+    {
+        var inputPath = inputPaths[i];
+
+        // 出力先: 1件なら --output をそのままファイル名として使う。複数なら
+        // --output はフォルダー扱いで「入力名.epub」を作る（未指定は入力の隣）。
+        var outputPath = inputPaths.Count == 1 && output is not null
+            ? output
+            : output is null
+                ? Path.ChangeExtension(inputPath, ".epub")
+                : Path.Combine(output, Path.GetFileNameWithoutExtension(inputPath) + ".epub");
+
+        if (inputPaths.Count > 1)
+        {
+            Console.WriteLine($"［{i + 1}/{inputPaths.Count}］{Path.GetFileName(inputPath)}");
+        }
+
+        try
+        {
+            var workDirectory = Path.Combine(Path.GetTempPath(), $"epubfabric-{Guid.NewGuid():N}");
+            var (project, _) = await BuildProjectFromPdf(
+                inputPath,
+                workDirectory,
+                dpi,
+                ollamaOptions,
+                preserveAllTextLines: layout == OutputLayout.Fixed,
+                enhancePages: options.ContainsKey("--enhance"),
+                writingMode: ParseWritingMode(options),
+                forceOcr: options.ContainsKey("--force-ocr"),
+                language: options.GetValueOrDefault("--language"),
+                maxPages: ParseMaxPages(options));
+
+            BuildEpub(project, layout, outputPath, imageOptions, coverImage);
+            Console.WriteLine($"{LayoutLabel(layout)}EPUBを生成しました: {outputPath}");
+        }
+        catch (Exception ex) when (inputPaths.Count > 1)
+        {
+            // 1件の失敗で残りを止めない。まとめて処理する意味がなくなるため。
+            failed++;
+            Console.Error.WriteLine($"エラー: {Path.GetFileName(inputPath)}: {ex.Message}");
+        }
+    }
+
+    if (inputPaths.Count > 1)
+    {
+        Console.WriteLine($"完了: {inputPaths.Count - failed} 件成功{(failed > 0 ? $" / {failed} 件失敗" : string.Empty)}");
+    }
+
+    return failed > 0 ? 1 : 0;
 }
 
 static async Task<int> RunEvaluate(string[] args)
@@ -338,7 +389,14 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
 
 static (string? PositionalArg, Dictionary<string, string> Options) ParseOptions(string[] args)
 {
-    string? positional = null;
+    var (positionals, options) = ParseOptionsMulti(args);
+    return (positionals.Count > 0 ? positionals[0] : null, options);
+}
+
+/// <summary>位置引数を全て受け取る版。convert は複数のPDFをまとめて変換できる。</summary>
+static (List<string> PositionalArgs, Dictionary<string, string> Options) ParseOptionsMulti(string[] args)
+{
+    var positionals = new List<string>();
     var options = new Dictionary<string, string>();
 
     for (var i = 1; i < args.Length; i++)
@@ -353,11 +411,11 @@ static (string? PositionalArg, Dictionary<string, string> Options) ParseOptions(
         }
         else
         {
-            positional ??= args[i];
+            positionals.Add(args[i]);
         }
     }
 
-    return (positional, options);
+    return (positionals, options);
 }
 
 static int ParseDpi(Dictionary<string, string> options) =>
@@ -414,7 +472,7 @@ static void PrintUsage()
 {
     Console.WriteLine("使い方:");
     Console.WriteLine("  epubfabric-cli info <input.pdf>");
-    Console.WriteLine("  epubfabric-cli convert <input.pdf> [--output <output.epub>] [--layout <fixed|reflow>] [--dpi <dpi>] [--enhance] [--force-ocr] [--language <code>] [--max-pages <n>] [--vertical|--horizontal] [--cover-image] [--image-quality <1-100>] [--max-image-size <px>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
+    Console.WriteLine("  epubfabric-cli convert <input.pdf> [<input2.pdf> ...] [--output <output.epub|出力フォルダー>] [--layout <fixed|reflow>] [--dpi <dpi>] [--enhance] [--force-ocr] [--language <code>] [--max-pages <n>] [--vertical|--horizontal] [--cover-image] [--image-quality <1-100>] [--max-image-size <px>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric-cli evaluate <input.pdf> [--report <report-dir>] [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric-cli analyze <input.pdf> --project <book.efproj> [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric-cli export <book.efproj> --format epub [--output <output.epub>] [--layout <fixed|reflow>] [--cover-image] [--image-quality <1-100>] [--max-image-size <px>]");
@@ -427,6 +485,7 @@ static void PrintUsage()
     Console.WriteLine("  --force-ocr を指定すると、PDFのテキスト層を使わず全ページをOCRで再認識します（古いスキャンOCR由来の低精度テキスト層を持つPDF向け）。");
     Console.WriteLine("  言語（dc:language）は認識テキストから自動判定します（ja/en/zh/ko）。--language <code> で強制できます。");
     Console.WriteLine("  --max-pages <n> を指定すると先頭からnページまでで変換を打ち切ります（試し変換・設定調整用）。");
+    Console.WriteLine("  convert はPDFを複数指定して連続変換できます。その場合 --output は出力フォルダー（未指定なら各PDFと同じ場所）で、1件が失敗しても残りは続行します。");
     Console.WriteLine("  1ページ目の画像は表紙（cover-image）として設定されます（固定レイアウト）。");
     Console.WriteLine("  --cover-image を指定すると、リフロー型でも1ページ目をテキスト化せずページ画像のまま表紙として収録します（表紙のOCR誤読が本文へ混入するのを防げます）。");
     Console.WriteLine("  --ollama を指定すると、Ollamaによる意味分類（見出し・本文などの補正）とOCR文字列の校正を行います（既定では無効）。");

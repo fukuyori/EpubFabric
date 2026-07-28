@@ -2,11 +2,14 @@ using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using EpubFabric.Core.Models;
 using EpubFabric.Pipeline;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Windows.Storage.Pickers;
 
 namespace EpubFabric_App;
@@ -18,6 +21,7 @@ namespace EpubFabric_App;
 public sealed partial class MainPage : Page
 {
     private readonly ObservableCollection<string> _logLines = [];
+    private readonly ObservableCollection<ConversionItem> _files = [];
     private CancellationTokenSource? _cancellation;
     private string? _lastOutputPath;
     private EpubFabricProject? _lastProject;
@@ -28,12 +32,33 @@ public sealed partial class MainPage : Page
     {
         InitializeComponent();
         LogList.ItemsSource = _logLines;
+        FileList.ItemsSource = _files;
+        VersionText.Text = $"v{AppVersion()}";
 
         // 起動引数でPDFが渡されていれば選択済みの状態で開始する。
         if (App.StartupPdfPath is { } startupPdf)
         {
-            SetInputPdf(startupPdf);
+            AddFiles([startupPdf]);
         }
+    }
+
+    /// <summary>
+    /// 表示用のバージョン。ビルド時に埋め込まれる情報バージョンは
+    /// 「0.2.3+&lt;コミットハッシュ&gt;」の形になるため、ハッシュ部分は落とす。
+    /// </summary>
+    private static string AppVersion()
+    {
+        var informational = typeof(MainPage).Assembly
+            .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+
+        if (!string.IsNullOrWhiteSpace(informational))
+        {
+            var plus = informational.IndexOf('+');
+            return plus < 0 ? informational : informational[..plus];
+        }
+
+        var version = typeof(MainPage).Assembly.GetName().Version;
+        return version is null ? "?" : $"{version.Major}.{version.Minor}.{version.Build}";
     }
 
     private void OnDragOver(object sender, Microsoft.UI.Xaml.DragEventArgs e)
@@ -57,25 +82,67 @@ public sealed partial class MainPage : Page
         }
 
         var items = await e.DataView.GetStorageItemsAsync();
-        var pdf = items.OfType<Windows.Storage.StorageFile>()
-            .FirstOrDefault(f => f.FileType.Equals(".pdf", StringComparison.OrdinalIgnoreCase));
-        if (pdf is null)
+        var pdfs = items.OfType<Windows.Storage.StorageFile>()
+            .Where(f => f.FileType.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
+            .Select(f => f.Path)
+            .ToList();
+        if (pdfs.Count == 0)
         {
             StatusText.Text = "PDF ファイルをドロップしてください。";
             return;
         }
 
-        SetInputPdf(pdf.Path);
+        // 1件ずつ落として順番に積み上げられるよう、ドロップは常に追加として扱う。
+        AddFiles(pdfs);
     }
 
-    private void SetInputPdf(string path)
+    /// <summary>一覧へ追加する。同じファイルは重ねない。並びは追加した順を保つ。</summary>
+    private void AddFiles(IReadOnlyList<string> paths)
     {
-        InputPathBox.Text = path;
-        OutputPathBox.Text = Path.ChangeExtension(path, ".epub");
-        ConvertButton.IsEnabled = true;
-        EditorButton.IsEnabled = false;
-        OpenFolderButton.IsEnabled = false;
-        StatusText.Text = "変換を開始できます。";
+        var added = 0;
+        foreach (var path in paths)
+        {
+            if (_files.Any(f => string.Equals(f.Path, path, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            _files.Add(new ConversionItem(path));
+            added++;
+        }
+
+        UpdateFileListState();
+        StatusText.Text = added == 0
+            ? "すでに一覧にあるファイルです。"
+            : $"{_files.Count} 件を変換できます。";
+    }
+
+    private void UpdateFileListState()
+    {
+        FileCountText.Text = $"変換する PDF（{_files.Count} 件）";
+        var idle = _cancellation is null;
+        ConvertButton.IsEnabled = idle && _files.Count > 0;
+        ClearInputButton.IsEnabled = idle && _files.Count > 0;
+        RemoveInputButton.IsEnabled = idle && FileList.SelectedItems.Count > 0;
+    }
+
+    private void OnFileSelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateFileListState();
+
+    private void OnRemoveInputClick(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    {
+        foreach (var item in FileList.SelectedItems.Cast<ConversionItem>().ToList())
+        {
+            _files.Remove(item);
+        }
+
+        UpdateFileListState();
+    }
+
+    private void OnClearInputClick(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    {
+        _files.Clear();
+        UpdateFileListState();
+        StatusText.Text = "PDF を追加すると変換を開始できます。";
     }
 
     private async void OnPickInputClick(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
@@ -87,29 +154,24 @@ public sealed partial class MainPage : Page
         picker.FileTypeFilter.Add(".pdf");
         InitializeWithMainWindow(picker);
 
-        var file = await picker.PickSingleFileAsync();
-        if (file is not null)
+        var files = await picker.PickMultipleFilesAsync();
+        if (files is { Count: > 0 })
         {
-            SetInputPdf(file.Path);
+            // まとめて選んだ場合、ピッカーが返す順は不定なので名前順で積む。
+            AddFiles(files.Select(f => f.Path).OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList());
         }
     }
 
     private async void OnPickOutputClick(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
     {
-        var picker = new FileSavePicker
-        {
-            SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
-            SuggestedFileName = string.IsNullOrWhiteSpace(InputPathBox.Text)
-                ? "book"
-                : Path.GetFileNameWithoutExtension(InputPathBox.Text),
-        };
-        picker.FileTypeChoices.Add("EPUB", [".epub"]);
+        var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary };
+        picker.FileTypeFilter.Add("*");
         InitializeWithMainWindow(picker);
 
-        var file = await picker.PickSaveFileAsync();
-        if (file is not null)
+        var folder = await picker.PickSingleFolderAsync();
+        if (folder is not null)
         {
-            OutputPathBox.Text = file.Path;
+            OutputPathBox.Text = folder.Path;
         }
     }
 
@@ -118,35 +180,51 @@ public sealed partial class MainPage : Page
 
     private async void OnConvertClick(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
     {
-        var inputPath = InputPathBox.Text;
-        if (string.IsNullOrWhiteSpace(inputPath) || !File.Exists(inputPath))
+        var inputs = _files.ToList();
+        if (inputs.Count == 0)
         {
-            StatusText.Text = "入力 PDF が見つかりません。";
+            StatusText.Text = "変換する PDF を追加してください。";
             return;
         }
 
-        var outputPath = string.IsNullOrWhiteSpace(OutputPathBox.Text)
-            ? Path.ChangeExtension(inputPath, ".epub")
-            : OutputPathBox.Text;
+        foreach (var item in inputs)
+        {
+            item.Status = "待機中";
+            item.OutputPath = null;
+        }
+
         var layout = LayoutCombo.SelectedIndex == 1 ? OutputLayout.Reflow : OutputLayout.Fixed;
-        var options = new ConversionOptions
+        var dpi = double.IsNaN(DpiBox.Value) ? 300 : (int)DpiBox.Value;
+        var maxPages = !double.IsNaN(MaxPagesBox.Value) && MaxPagesBox.Value > 0 ? (int)MaxPagesBox.Value : (int?)null;
+        var writingMode = WritingModeCombo.SelectedIndex switch
+        {
+            1 => WritingModeSetting.Horizontal,
+            2 => WritingModeSetting.Vertical,
+            _ => WritingModeSetting.Auto,
+        };
+        var ollama = OllamaCheck.IsChecked == true
+            ? new OllamaPipelineOptions("http://localhost:11434", OllamaModelBox.Text.Trim())
+            : null;
+
+        var outputSetting = OutputPathBox.Text;
+
+        ConversionOptions OptionsFor(string inputPath) => new()
         {
             InputPath = inputPath,
-            Dpi = double.IsNaN(DpiBox.Value) ? 300 : (int)DpiBox.Value,
+            Dpi = dpi,
             PreserveAllTextLines = layout == OutputLayout.Fixed,
             EnhancePages = EnhanceCheck.IsChecked == true,
             ForceOcr = ForceOcrCheck.IsChecked == true,
-            MaxPages = !double.IsNaN(MaxPagesBox.Value) && MaxPagesBox.Value > 0 ? (int)MaxPagesBox.Value : null,
-            WritingMode = WritingModeCombo.SelectedIndex switch
-            {
-                1 => WritingModeSetting.Horizontal,
-                2 => WritingModeSetting.Vertical,
-                _ => WritingModeSetting.Auto,
-            },
-            Ollama = OllamaCheck.IsChecked == true
-                ? new OllamaPipelineOptions("http://localhost:11434", OllamaModelBox.Text.Trim())
-                : null,
+            MaxPages = maxPages,
+            WritingMode = writingMode,
+            Ollama = ollama,
         };
+
+        // 出力先: 指定フォルダー（未指定なら各PDFと同じ場所）に「入力名.epub」で出す。
+        string OutputFor(string inputPath) =>
+            string.IsNullOrWhiteSpace(outputSetting)
+                ? Path.ChangeExtension(inputPath, ".epub")
+                : Path.Combine(outputSetting, Path.GetFileNameWithoutExtension(inputPath) + ".epub");
 
         _cancellation = new CancellationTokenSource();
         SetRunningState(true);
@@ -168,34 +246,93 @@ public sealed partial class MainPage : Page
         });
 
         var coverPageAsImage = CoverImageCheck.IsChecked == true;
+        var succeeded = 0;
+        var failed = 0;
 
         try
         {
             var token = _cancellation.Token;
-            var convertedProject = await Task.Run(
-                async () =>
-                {
-                    var pipeline = new ConversionPipeline();
-                    var (project, _) = await pipeline.BuildProjectAsync(options, progress, token);
-                    token.ThrowIfCancellationRequested();
-                    pipeline.BuildEpub(project, layout, outputPath, coverPageAsImage: coverPageAsImage);
-                    return project;
-                },
-                token);
 
-            _lastOutputPath = outputPath;
-            _lastProject = convertedProject;
-            _lastLayout = layout;
-            _lastCoverPageAsImage = coverPageAsImage;
-            OpenFolderButton.IsEnabled = true;
-            EditorButton.IsEnabled = true;
+            for (var i = 0; i < inputs.Count; i++)
+            {
+                token.ThrowIfCancellationRequested();
+
+                var item = inputs[i];
+                var inputPath = item.Path;
+                var outputPath = OutputFor(inputPath);
+
+                if (!File.Exists(inputPath))
+                {
+                    item.Status = "見つかりません";
+                    failed++;
+                    AppendLog($"エラー: ファイルが見つかりません: {inputPath}");
+                    continue;
+                }
+
+                item.Status = "変換中";
+                FileList.ScrollIntoView(item);
+                AppendLog($"［{i + 1}/{inputs.Count}］{item.Name}");
+                StatusText.Text = inputs.Count == 1
+                    ? "変換しています..."
+                    : $"変換しています（{i + 1}/{inputs.Count}）: {item.Name}";
+
+                ConvertProgressBar.IsIndeterminate = true;
+
+                try
+                {
+                    var options = OptionsFor(inputPath);
+                    var convertedProject = await Task.Run(
+                        async () =>
+                        {
+                            var pipeline = new ConversionPipeline();
+                            var (project, _) = await pipeline.BuildProjectAsync(options, progress, token);
+                            token.ThrowIfCancellationRequested();
+                            pipeline.BuildEpub(project, layout, outputPath, coverPageAsImage: coverPageAsImage);
+                            return project;
+                        },
+                        token);
+
+                    // 校正画面と「出力フォルダを開く」は、最後に成功した1件を対象にする。
+                    _lastOutputPath = outputPath;
+                    _lastProject = convertedProject;
+                    _lastLayout = layout;
+                    _lastCoverPageAsImage = coverPageAsImage;
+                    OpenFolderButton.IsEnabled = true;
+                    EditorButton.IsEnabled = true;
+                    succeeded++;
+                    item.Status = "完了";
+                    item.OutputPath = outputPath;
+                    AppendLog($"EPUBを生成しました: {outputPath}");
+                }
+                catch (OperationCanceledException)
+                {
+                    item.Status = "中止";
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // 1件の失敗で残りを止めない（まとめて処理する意味がなくなるため）。
+                    failed++;
+                    item.Status = "失敗";
+                    AppendLog($"エラー: {item.Name}: {ex.Message}");
+                }
+            }
+
             ConvertProgressBar.Value = 100;
-            StatusText.Text = $"完了: {outputPath}";
-            AppendLog($"EPUBを生成しました: {outputPath}");
+            StatusText.Text = inputs.Count == 1
+                ? failed == 0 ? $"完了: {_lastOutputPath}" : "エラーで終了しました。"
+                : $"完了: {succeeded} 件成功{(failed > 0 ? $" / {failed} 件失敗" : string.Empty)}";
         }
         catch (OperationCanceledException)
         {
-            StatusText.Text = "キャンセルしました。";
+            foreach (var remaining in inputs.Where(f => f.Status is "待機中" or "変換中"))
+            {
+                remaining.Status = "中止";
+            }
+
+            StatusText.Text = inputs.Count == 1
+                ? "キャンセルしました。"
+                : $"キャンセルしました（{succeeded} 件完了）。";
             AppendLog("変換をキャンセルしました。");
         }
         catch (Exception ex)
@@ -236,10 +373,10 @@ public sealed partial class MainPage : Page
 
     private void SetRunningState(bool running)
     {
-        ConvertButton.IsEnabled = !running && !string.IsNullOrWhiteSpace(InputPathBox.Text);
         CancelButton.IsEnabled = running;
         PickInputButton.IsEnabled = !running;
         PickOutputButton.IsEnabled = !running;
+        UpdateFileListState();
         LayoutCombo.IsEnabled = !running;
         WritingModeCombo.IsEnabled = !running;
         DpiBox.IsEnabled = !running;
@@ -251,13 +388,78 @@ public sealed partial class MainPage : Page
         OllamaModelBox.IsEnabled = !running && OllamaCheck.IsChecked == true;
     }
 
+    /// <summary>複数ファイルの連続変換ではログが際限なく伸びるため、古い行から捨てる。</summary>
+    private const int MaxLogLines = 5000;
+
+    private ScrollViewer? _logScrollViewer;
+    private bool _scrollPending;
+
     private void AppendLog(string message)
     {
         _logLines.Add(message);
-        if (_logLines.Count > 0)
+
+        while (_logLines.Count > MaxLogLines)
         {
-            LogList.ScrollIntoView(_logLines[^1]);
+            _logLines.RemoveAt(0);
         }
+
+        ScrollLogToEnd();
+    }
+
+    /// <summary>
+    /// 常に最新の行が見えるようにログを末尾までスクロールする。
+    /// ListView.ScrollIntoView は行を追加した直後だと表示用のコンテナがまだ作られておらず
+    /// 効かないため、内側のScrollViewerを直接動かす。さらに、追加した行の高さが
+    /// レイアウトに反映される前にスクロール量を読むと最終行が見切れるので、
+    /// UpdateLayoutで確定させてから移動する。
+    /// ログは1ページにつき数行届くため、保留中のスクロールは1つにまとめる。
+    /// </summary>
+    private void ScrollLogToEnd()
+    {
+        if (_scrollPending)
+        {
+            return;
+        }
+
+        _scrollPending = true;
+
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            _scrollPending = false;
+            _logScrollViewer ??= FindScrollViewer(LogList);
+
+            if (_logScrollViewer is null)
+            {
+                if (_logLines.Count > 0)
+                {
+                    LogList.ScrollIntoView(_logLines[^1]);
+                }
+
+                return;
+            }
+
+            LogList.UpdateLayout();
+            _logScrollViewer.ChangeView(null, _logScrollViewer.ScrollableHeight, null, disableAnimation: true);
+        });
+    }
+
+    private static ScrollViewer? FindScrollViewer(DependencyObject root)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is ScrollViewer scrollViewer)
+            {
+                return scrollViewer;
+            }
+
+            if (FindScrollViewer(child) is { } found)
+            {
+                return found;
+            }
+        }
+
+        return null;
     }
 
     private static void InitializeWithMainWindow(object picker)
