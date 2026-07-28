@@ -4,6 +4,9 @@
     <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <RootNamespace>EpubFabric_App</RootNamespace>
+    <!-- 利用者が起動するのはGUIなので、製品名そのものを実行ファイル名にする。
+         `epubfabric` と打つとこれが起動する。CLI は epubfabric-cli.exe として別フォルダーに置く。 -->
+    <AssemblyName>EpubFabric</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- exe自体にアイコンを埋め込む（エクスプローラー・タスクバー・ショートカット用）。
          実行時のウィンドウアイコンは MainWindow が同じicoを読み込む。 -->
@@ -88,7 +91,11 @@
   <PropertyGroup>
     <PublishReadyToRun Condition="'$(Configuration)' == 'Debug'">False</PublishReadyToRun>
     <PublishReadyToRun Condition="'$(Configuration)' != 'Debug'">True</PublishReadyToRun>
-    <PublishTrimmed Condition="'$(Configuration)' == 'Debug'">False</PublishTrimmed>
-    <PublishTrimmed Condition="'$(Configuration)' != 'Debug'">True</PublishTrimmed>
+    <!-- トリミングは使わない。有効にすると SDK が runtimeconfig に
+         System.Text.Json.JsonSerializer.IsReflectionEnabledByDefault=false を焼き込み、
+         リフレクションベースのJSONを使う OllamaClient が実行時に例外で落ちる
+         （Ollama 分類・校正が使えなくなる）。この設定はビルド時に決まるため、
+         publish 側で打ち消すことはできない。 -->
+    <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
 </Project>

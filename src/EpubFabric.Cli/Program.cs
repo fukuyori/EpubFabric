@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using EpubFabric.Core.Models;
 using EpubFabric.Document;
 using EpubFabric.Epub;
@@ -197,7 +197,7 @@ static async Task<int> RunAnalyze(string[] args)
 
     Console.WriteLine($"プロジェクトを保存しました: {projectDirectory}");
     Console.WriteLine($"blocks/text 内のテキストファイルを編集して校正できます。校正後は次を実行してください:");
-    Console.WriteLine($"  epubfabric export {projectDirectory} --format epub");
+    Console.WriteLine($"  epubfabric-cli export {projectDirectory} --format epub");
     return 0;
 }
 
@@ -413,11 +413,11 @@ static bool RequireExistingFile(string path)
 static void PrintUsage()
 {
     Console.WriteLine("使い方:");
-    Console.WriteLine("  epubfabric info <input.pdf>");
-    Console.WriteLine("  epubfabric convert <input.pdf> [--output <output.epub>] [--layout <fixed|reflow>] [--dpi <dpi>] [--enhance] [--force-ocr] [--language <code>] [--max-pages <n>] [--vertical|--horizontal] [--cover-image] [--image-quality <1-100>] [--max-image-size <px>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
-    Console.WriteLine("  epubfabric evaluate <input.pdf> [--report <report-dir>] [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
-    Console.WriteLine("  epubfabric analyze <input.pdf> --project <book.efproj> [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
-    Console.WriteLine("  epubfabric export <book.efproj> --format epub [--output <output.epub>] [--layout <fixed|reflow>] [--cover-image] [--image-quality <1-100>] [--max-image-size <px>]");
+    Console.WriteLine("  epubfabric-cli info <input.pdf>");
+    Console.WriteLine("  epubfabric-cli convert <input.pdf> [--output <output.epub>] [--layout <fixed|reflow>] [--dpi <dpi>] [--enhance] [--force-ocr] [--language <code>] [--max-pages <n>] [--vertical|--horizontal] [--cover-image] [--image-quality <1-100>] [--max-image-size <px>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
+    Console.WriteLine("  epubfabric-cli evaluate <input.pdf> [--report <report-dir>] [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
+    Console.WriteLine("  epubfabric-cli analyze <input.pdf> --project <book.efproj> [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
+    Console.WriteLine("  epubfabric-cli export <book.efproj> --format epub [--output <output.epub>] [--layout <fixed|reflow>] [--cover-image] [--image-quality <1-100>] [--max-image-size <px>]");
     Console.WriteLine();
     Console.WriteLine("  convert/export は固定レイアウトEPUBを生成します。従来のリフロー型は --layout reflow で選択できます。");
     Console.WriteLine("  evaluate はEPUBを生成せず、ページ画像+検出ブロックと生成されるEPUB断片を左右対照したHTMLレポート（index.html）と定量メトリクス（metrics.json）を出力します。");

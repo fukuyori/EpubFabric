@@ -246,6 +246,7 @@ public sealed partial class MainPage : Page
         MaxPagesBox.IsEnabled = !running;
         EnhanceCheck.IsEnabled = !running;
         ForceOcrCheck.IsEnabled = !running;
+        CoverImageCheck.IsEnabled = !running;
         OllamaCheck.IsEnabled = !running;
         OllamaModelBox.IsEnabled = !running && OllamaCheck.IsChecked == true;
     }

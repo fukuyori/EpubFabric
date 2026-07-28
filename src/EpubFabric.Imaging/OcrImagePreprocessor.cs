@@ -77,6 +77,14 @@ public sealed class OcrImagePreprocessor
     /// <summary>傾き推定に使う縮小画像の高さ。精度0.1°の探索にはこの程度で十分。</summary>
     private const int AnalysisHeight = 800;
 
+    /// <summary>
+    /// 補正を採用するために必要な、無回転に対する投影スコアの改善率。
+    /// 本文行が少なく写真や図版が主体のページでは、行の代わりに被写体の輪郭が
+    /// 投影の山を作り、まったく傾いていない紙面に極端な角度が出る。実測では
+    /// 本当に傾いた本文ページの比が1.8以上、誤推定のページは1.05以下と離れている。
+    /// </summary>
+    private const double MinPeakProminence = 1.3;
+
     public OcrPreprocessResult Preprocess(string originalImagePath, string processedImagePath)
     {
         using var original = Cv2.ImRead(originalImagePath, ImreadModes.Color);
@@ -115,10 +123,20 @@ public sealed class OcrImagePreprocessor
         }
 
         var coarse = SearchBestAngle(binary, -MaxSearchDegrees, MaxSearchDegrees, 0.5);
-        return SearchBestAngle(binary, coarse - 0.5, coarse + 0.5, 0.1);
+
+        // 精探索が探索上限を越えないようにする（越えると「±10.5°」のような、
+        // 探索範囲の端に張り付いた値がそのまま採用されてしまう）。
+        var from = Math.Max(-MaxSearchDegrees, coarse.Angle - 0.5);
+        var to = Math.Min(MaxSearchDegrees, coarse.Angle + 0.5);
+        var best = SearchBestAngle(binary, from, to, 0.1);
+
+        // 行が揃うことで山ができたのかを確かめる。無回転と大差ないなら、
+        // 見つかった角度は本文行ではなく写真や図版の輪郭に由来する。
+        var zeroScore = ProjectionScore(binary, 0.0);
+        return zeroScore > 0 && best.Score / zeroScore >= MinPeakProminence ? best.Angle : 0.0;
     }
 
-    private static double SearchBestAngle(Mat binary, double from, double to, double step)
+    private static (double Angle, double Score) SearchBestAngle(Mat binary, double from, double to, double step)
     {
         var bestAngle = 0.0;
         var bestScore = double.MinValue;
@@ -133,7 +151,7 @@ public sealed class OcrImagePreprocessor
             }
         }
 
-        return bestAngle;
+        return (bestAngle, bestScore);
     }
 
     /// <summary>

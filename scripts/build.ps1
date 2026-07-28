@@ -1,25 +1,29 @@
 <#
 .SYNOPSIS
-EpubFabric を開発用にビルドし、テストを実行する。
+EpubFabric をビルドし、テストを実行する。
 
 .DESCRIPTION
 ソリューション（EpubFabric.slnx）全体を復元・ビルドし、単体テストを実行する。
 CLI・GUI・テストがまとめて対象になる。
 
 コンパイルはすべてこのスクリプトが行う。scripts\publish.ps1 はコンパイルせず
-（dotnet publish --no-build）、ここでできた成果物を配布用に並べ直すだけなので、
-配布物を作る前には -Runtime を付けて配布用ビルドを作っておく必要がある。
+（dotnet publish --no-build）、ここでできた成果物を配布物に仕立てるだけなので、
+既定では publish.ps1 の既定（Release / win-x64）に合わせて配布用ビルドまで作る。
 
-  手元で動かすビルド : .\scripts\build.ps1
-  配布用ビルド       : .\scripts\build.ps1 -Configuration Release -Runtime win-x64
+  .\scripts\build.ps1      ビルドとテスト
+  .\scripts\publish.ps1    配布フォルダーとインストーラーの作成
+
+いずれも引数なしで、この順に実行すればインストーラーまで出来上がる。
+
+デバッグしたいときだけ -Configuration Debug を付ける。
 
 .PARAMETER Configuration
-ビルド構成。既定は Debug。
+ビルド構成。既定は Release（publish.ps1 の既定に合わせる）。
 
 .PARAMETER Runtime
-配布用ビルドの対象ランタイム識別子（win-x64 等）。指定すると、publish.ps1 が
-そのまま配布できるよう、自己完結型（.NETランタイム同梱）でCLIとGUIをビルドする。
-未指定なら通常の開発用ビルド（フレームワーク依存）。
+配布用ビルドの対象ランタイム識別子。既定は win-x64 で、publish.ps1 がそのまま
+配布できるよう自己完結型（.NETランタイム同梱）でCLIとGUIをビルドする。
+空文字を渡すと配布用ビルドを省略し、通常のビルド（フレームワーク依存）だけを行う。
 
 .PARAMETER SkipTests
 テストの実行を省略し、ビルドだけを行う。
@@ -32,16 +36,17 @@ CLI・GUI・テストがまとめて対象になる。
 
 .EXAMPLE
 .\scripts\build.ps1
-.\scripts\build.ps1 -Configuration Release
-.\scripts\build.ps1 -Configuration Release -Runtime win-x64
+.\scripts\build.ps1 -Configuration Debug
+.\scripts\build.ps1 -Runtime "" -SkipTests
 .\scripts\build.ps1 -TestFilter ColumnDetectorTests
 .\scripts\build.ps1 -Clean
 #>
 [CmdletBinding()]
 param(
     [ValidateSet("Debug", "Release")]
-    [string]$Configuration = "Debug",
-    [string]$Runtime,
+    [string]$Configuration = "Release",
+    [AllowEmptyString()]
+    [string]$Runtime = "win-x64",
     [switch]$SkipTests,
     [string]$TestFilter,
     [switch]$Clean
@@ -127,9 +132,9 @@ if (-not $SkipTests) {
 $stopwatch.Stop()
 
 # 実行してすぐ動かせるよう、生成された実行ファイルの場所を示す。
-$cliExe = Get-ChildItem (Join-Path $repoRoot "src\EpubFabric.Cli\bin\$Configuration") -Recurse -Filter "epubfabric.exe" -ErrorAction SilentlyContinue |
+$cliExe = Get-ChildItem (Join-Path $repoRoot "src\EpubFabric.Cli\bin\$Configuration") -Recurse -Filter "epubfabric-cli.exe" -ErrorAction SilentlyContinue |
     Select-Object -First 1
-$guiExe = Get-ChildItem (Join-Path $repoRoot "src\EpubFabric.App\bin") -Recurse -Filter "EpubFabric.App.exe" -ErrorAction SilentlyContinue |
+$guiExe = Get-ChildItem (Join-Path $repoRoot "src\EpubFabric.App\bin") -Recurse -Filter "EpubFabric.exe" -ErrorAction SilentlyContinue |
     Where-Object { $_.FullName -like "*\$Configuration\*" } |
     Select-Object -First 1
 
@@ -140,8 +145,14 @@ if ($guiExe) { Write-Host ("  GUI : {0}" -f $guiExe.FullName) }
 Write-Host ""
 
 if ($Runtime) {
-    Write-Host "配布物にまとめる: .\scripts\publish.ps1 -Configuration $Configuration -Runtime $Runtime"
+    # publish.ps1 の既定（Release / win-x64）と同じなら引数は要らない。
+    # 違うときだけ、そのまま貼って実行できるよう必要な引数を添える。
+    $publishOptions = ""
+    if ($Configuration -ne "Release") { $publishOptions += " -Configuration $Configuration" }
+    if ($Runtime -ne "win-x64") { $publishOptions += " -Runtime $Runtime" }
+
+    Write-Host ("配布物（フォルダー + インストーラー）を作る: .\scripts\publish.ps1{0}" -f $publishOptions)
 }
 else {
-    Write-Host "配布用ビルドを作る場合: .\scripts\build.ps1 -Configuration Release -Runtime win-x64"
+    Write-Host "配布用ビルドを作る場合: .\scripts\build.ps1 -Configuration $Configuration -Runtime win-x64"
 }

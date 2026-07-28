@@ -13,8 +13,14 @@ public static class ColumnDetector
 {
     private const double GutterStep = 0.01;
 
-    /// <summary>分割後の各段が持つべき最小の項目割合。これ未満の偏った分割はガターとみなさない。</summary>
-    private const double MinColumnShare = 0.2;
+    /// <summary>分割後の各段が持つべき最小の項目割合。これ未満の偏った分割はガターとみなさない。
+    /// 記事タイトルを縦組みで置く細いサイドバーは本文に対して1割にも満たないため、
+    /// 割合の下限は低く取り、代わりに件数の下限（<see cref="MinColumnItems"/>）と
+    /// 跨ぎ行の許容数で誤分割を防ぐ。</summary>
+    private const double MinColumnShare = 0.05;
+
+    /// <summary>分割後の各段が持つべき最小の項目数。1〜2件の孤立した行で段を作らせない。</summary>
+    private const int MinColumnItems = 2;
 
     /// <summary>例外的に段をまたぐ項目（図中ラベル・キャプション等）を許容する最低数。</summary>
     private const int MinCrossingTolerance = 2;
@@ -22,14 +28,19 @@ public static class ColumnDetector
     /// <summary>段をまたぐ項目の許容割合。本文が多いページでは図解由来のまたぎ行も増えるため行数比で許容する。</summary>
     private const double CrossingToleranceRatio = 0.08;
 
-    /// <summary>領域幅に対してこの割合より広い項目は、段をまたぐ要素として扱う。</summary>
+    /// <summary>領域幅に対してこの割合より広い項目は、段間の探索から除く（段をまたぐ要素とみなす）。</summary>
     private const double WideItemWidthRatio = 0.5;
+
+    /// <summary>全項目のうちこの割合を超える数が跨ぐ位置は、段間ではないとみなす。</summary>
+    private const double MaxCrossingShare = 0.35;
 
     /// <summary>再帰分割の最大深さ。2で最大4段まで検出できる。</summary>
     private const int MaxDepth = 2;
 
-    /// <summary>ガターは領域の両端からこの割合だけ内側を探索する（余白をガターと誤認しないため）。</summary>
-    private const double GutterSearchInset = 0.25;
+    /// <summary>ガターは領域の両端からこの割合だけ内側を探索する（余白をガターと誤認しないため）。
+    /// 記事タイトルの縦組みなど、紙面の端に寄った細い段はここから外れると見つけられないため
+    /// 浅めに取る。余白そのものは、片側に項目が残らず段の条件を満たさないので除外される。</summary>
+    private const double GutterSearchInset = 0.10;
 
     /// <summary>これより項目が少ない領域は分割しない。</summary>
     private const int MinItemsToSplit = 4;
@@ -107,29 +118,27 @@ public static class ColumnDetector
             return [items];
         }
 
+        // ガターの探索では、領域の半分を超える幅の項目（段をまたぐ大見出しや広告枠など）を
+        // 除く。含めるとどの位置も「跨がれている」ことになり、段間を見つけられなくなる。
         var wideThreshold = regionWidth * WideItemWidthRatio;
-        var normalItems = items.Where(i => boundsOf(i).Width <= wideThreshold).ToList();
-        var wideItems = items.Where(i => boundsOf(i).Width > wideThreshold).ToList();
-
-        // 1段だけの領域では、行がその段の幅いっぱいに伸びるため「段をまたぐ幅広項目」と
-        // 判定されてしまう。多数派が幅広なら段ではなく既に1段の領域とみなし、分割しない。
-        // （分割すると幅広項目が1行ずつのグループへ解体され、読み順がY座標順に崩れて
-        // 2段組みの左右が交互に並ぶ。）本当に段が分かれている領域では、各行は分割後の
-        // 段の幅に収まるため多数派が幅広になることはない。
-        if (normalItems.Count < MinItemsToSplit || normalItems.Count * 2 < items.Count)
+        var narrowItems = items.Where(i => boundsOf(i).Width <= wideThreshold).ToList();
+        if (narrowItems.Count < MinItemsToSplit)
         {
             return [items];
         }
 
-        var gutter = FindWidestGutterBand(normalItems, boundsOf, xStart, xEnd);
+        var gutter = FindWidestGutterBand(items, narrowItems, boundsOf, xStart, xEnd);
         if (gutter is null)
         {
             return [items];
         }
 
+        // 振り分けは全項目に対して行う。幅が広いだけで実際には段間を跨がない項目
+        // （1段組みページの本文行など）を切り離すと、読み順がばらばらになるため、
+        // 独立させるのは本当に段間を跨ぐ項目だけにする。
         var gutterX = (gutter.Value.Start + gutter.Value.End) / 2;
-        var crossing = normalItems.Where(i => Crosses(boundsOf(i), gutterX)).ToList();
-        var nonCrossing = normalItems.Except(crossing).ToList();
+        var crossing = items.Where(i => Crosses(boundsOf(i), gutterX)).ToList();
+        var nonCrossing = items.Except(crossing).ToList();
         var left = nonCrossing.Where(i => Center(boundsOf(i)) < gutterX).ToList();
         var right = nonCrossing.Where(i => Center(boundsOf(i)) >= gutterX).ToList();
 
@@ -138,7 +147,7 @@ public static class ColumnDetector
         result.AddRange(Split(right, boundsOf, gutterX, xEnd, depth + 1));
 
         // 段をまたぐ項目は、大きな図と同様に個別の段として扱い、Y座標で他の段と並ぶ。
-        foreach (var item in wideItems.Concat(crossing))
+        foreach (var item in crossing)
         {
             result.Add([item]);
         }
@@ -152,7 +161,7 @@ public static class ColumnDetector
     /// 段間を選びやすくする。
     /// </summary>
     private static (double Start, double End)? FindWidestGutterBand<T>(
-        List<T> normalItems, Func<T, BoundingBox> boundsOf, double xStart, double xEnd)
+        List<T> items, List<T> narrowItems, Func<T, BoundingBox> boundsOf, double xStart, double xEnd)
     {
         var regionWidth = xEnd - xStart;
         var searchStart = xStart + regionWidth * GutterSearchInset;
@@ -164,7 +173,7 @@ public static class ColumnDetector
 
         for (var x = searchStart; x <= searchEnd + 1e-9; x += GutterStep)
         {
-            if (IsValidGutter(normalItems, boundsOf, x))
+            if (IsValidGutter(items, narrowItems, boundsOf, x))
             {
                 bandStart ??= x;
                 bandEnd = x;
@@ -189,13 +198,25 @@ public static class ColumnDetector
         return current is null || band.End - band.Start > current.Value.End - current.Value.Start ? band : current;
     }
 
-    private static bool IsValidGutter<T>(List<T> normalItems, Func<T, BoundingBox> boundsOf, double gutterX)
+    /// <summary>
+    /// ガター候補の妥当性を、細い項目と全項目の両方から見る。細い項目だけで判定すると、
+    /// 1段組みページで段落末の短い行だけを左右に振り分けた偽の段間を、本文行が跨いでいる
+    /// のに見逃してしまう。逆に全項目だけで判定すると、段をまたぐ広告枠や大見出しが数点
+    /// あるだけで本物の段間を弾いてしまう。
+    /// </summary>
+    private static bool IsValidGutter<T>(List<T> items, List<T> narrowItems, Func<T, BoundingBox> boundsOf, double gutterX)
     {
+        var allCrossingCount = items.Count(i => Crosses(boundsOf(i), gutterX));
+        if (allCrossingCount > items.Count * MaxCrossingShare)
+        {
+            return false;
+        }
+
         var crossingCount = 0;
         var leftCount = 0;
         var rightCount = 0;
 
-        foreach (var item in normalItems)
+        foreach (var item in narrowItems)
         {
             var bounds = boundsOf(item);
             if (Crosses(bounds, gutterX))
@@ -214,7 +235,7 @@ public static class ColumnDetector
             }
         }
 
-        var tolerance = Math.Max(MinCrossingTolerance, (int)(normalItems.Count * CrossingToleranceRatio));
+        var tolerance = Math.Max(MinCrossingTolerance, (int)(narrowItems.Count * CrossingToleranceRatio));
         if (crossingCount > tolerance)
         {
             return false;
@@ -228,7 +249,9 @@ public static class ColumnDetector
             return false;
         }
 
-        return leftCount >= nonCrossingCount * MinColumnShare
+        return leftCount >= MinColumnItems
+            && rightCount >= MinColumnItems
+            && leftCount >= nonCrossingCount * MinColumnShare
             && rightCount >= nonCrossingCount * MinColumnShare;
     }
 

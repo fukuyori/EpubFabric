@@ -42,6 +42,32 @@ public sealed class OcrImagePreprocessorTests : IDisposable
         Assert.False(File.Exists(processedPath));
     }
 
+    /// <summary>
+    /// 写真が主体で本文行のないページでは、被写体の輪郭が投影の山を作り、
+    /// まったく傾いていない紙面に極端な角度が出る（実データの裏表紙で-10.5°を観測）。
+    /// 行が揃ったことによる山かどうかを確かめて棄却することの回帰。
+    /// </summary>
+    [Fact]
+    public void 写真主体のページは傾きを推定しない()
+    {
+        var originalPath = Path.Combine(_tempDirectory, "photo.png");
+        var processedPath = Path.Combine(_tempDirectory, "processed.png");
+
+        using (var page = new Mat(1600, 1200, MatType.CV_8UC3, Scalar.All(255)))
+        {
+            // 斜めに置かれた被写体を模した楕円と、その影。行構造は持たない。
+            Cv2.Ellipse(page, new Point(600, 500), new Size(320, 180), 35, 0, 360, Scalar.All(40), thickness: -1);
+            Cv2.Ellipse(page, new Point(500, 1050), new Size(280, 150), -25, 0, 360, Scalar.All(90), thickness: -1);
+            Cv2.Ellipse(page, new Point(850, 1300), new Size(200, 120), 15, 0, 360, Scalar.All(120), thickness: -1);
+            Cv2.ImWrite(originalPath, page);
+        }
+
+        var result = new OcrImagePreprocessor().Preprocess(originalPath, processedPath);
+
+        Assert.False(result.DeskewApplied);
+        Assert.Equal(originalPath, result.ImagePathForOcr);
+    }
+
     [Fact]
     public void 白紙ページは補正しない()
     {
@@ -88,18 +114,12 @@ public sealed class OcrImagePreprocessorTests : IDisposable
         var originalPath = Path.Combine(_tempDirectory, "skewed-box.png");
         var processedPath = Path.Combine(_tempDirectory, "processed-box.png");
 
-        // 元画像: 中心から外れた位置に1つの黒矩形を置き、+3°回転した状態を「スキャン原稿」とする。
+        // 本文行のある紙面を+3°回転した状態を「スキャン原稿」とする。
+        // 単独の図形だけの紙面では傾き推定が「行が揃った」と判断できず補正されない
+        // （写真ページの誤補正を防ぐ判定が働く）ため、行のある紙面を使う。
         const int width = 1200;
         const int height = 1600;
-        var mark = new Rect(200, 400, 300, 60);
-        using (var page = new Mat(height, width, MatType.CV_8UC3, Scalar.All(255)))
-        {
-            Cv2.Rectangle(page, mark, Scalar.All(0), thickness: -1);
-            using var matrix = Cv2.GetRotationMatrix2D(new Point2f(width / 2f, height / 2f), skewDegrees, 1.0);
-            using var skewed = new Mat();
-            Cv2.WarpAffine(page, skewed, matrix, page.Size(), InterpolationFlags.Cubic, BorderTypes.Constant, Scalar.All(255));
-            Cv2.ImWrite(originalPath, skewed);
-        }
+        CreateTextLikeImage(originalPath, skewDegrees);
 
         var result = new OcrImagePreprocessor().Preprocess(originalPath, processedPath);
         Assert.True(result.DeskewApplied);

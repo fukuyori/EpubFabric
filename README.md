@@ -4,6 +4,8 @@ PDF（スキャン原稿・テキスト層付きの両方）を、検索・選�
 
 ページ画像で紙面の原型を保証しつつ、OCR・レイアウト解析・ローカル LLM（Ollama）による機械処理と人間の校正を組み合わせて文字情報を付加する、固定レイアウト EPUB 制作環境として設計しています（詳細は [docs/基本設計.md](docs/基本設計.md)）。
 
+各バージョンの変更点は [CHANGELOG.md](CHANGELOG.md) を参照してください。
+
 ## 特徴
 
 - **固定レイアウト EPUB**（既定）: PDF の 1 ページを EPUB の 1 ページとして収録。ページ画像の上に、座標付きの透明テキスト層を重ねるため、見た目は原本のまま検索・選択・読み上げができる。1 ページ目は表紙（cover-image）として設定される
@@ -30,11 +32,13 @@ PDF（スキャン原稿・テキスト層付きの両方）を、検索・選�
 git clone https://github.com/fukuyori/EpubFabric.git
 cd EpubFabric
 
-# ビルド + テスト（CLI・GUI・テストをまとめて）
+# ビルド + テスト（Release・配布用ビルドまで作られる）
 .\scripts\build.ps1
 
-# 構成やテストの絞り込み
-.\scripts\build.ps1 -Configuration Release
+# デバッグ構成で、配布用ビルドは省略する
+.\scripts\build.ps1 -Configuration Debug -Runtime ""
+
+# テストの省略・絞り込み、クリーンビルド
 .\scripts\build.ps1 -SkipTests
 .\scripts\build.ps1 -TestFilter ColumnDetectorTests
 .\scripts\build.ps1 -Clean
@@ -47,49 +51,64 @@ cd EpubFabric
 | スクリプト | 役割 | コンパイル |
 |---|---|---|
 | `build.ps1` | ソリューションのビルドとテスト | する |
-| `publish.ps1` | 配布フォルダーへの配置と、`-Installer` でセットアップEXEの作成 | しない |
+| `publish.ps1` | 配布フォルダーへの配置とインストーラーの作成 | しない |
+
+引数なしで `build.ps1` → `publish.ps1` の順に実行すれば、インストーラーまで出来上がります。
 
 ## 配布用実行ファイルの作成
 
-`publish.ps1` はコンパイルしないため、先に `build.ps1` へ `-Runtime` を渡して配布用ビルド（自己完結型・.NETランタイム同梱）を作っておきます。
+`publish.ps1` はコンパイルしないため、先に `build.ps1` で配布用ビルド（自己完結型・.NETランタイム同梱）を作っておきます。両スクリプトの既定は Release / win-x64 で揃えてあるので、引数なしでそのまま繋がります。
 
 ```powershell
 # 1) 配布用にビルドする
-.\scripts\build.ps1 -Configuration Release -Runtime win-x64
+.\scripts\build.ps1
 
-# 2) 配布フォルダーへまとめる
-#   CLI: publish\EpubFabric.Cli\win-x64\
-#   GUI: publish\EpubFabric.App\win-x64\
+# 2) 配布物を作る
+#   CLI       : publish\EpubFabric.Cli\win-x64\
+#   GUI       : publish\EpubFabric.App\win-x64\
+#   インストーラー: publish\installer\EpubFabric-Setup-<version>.exe
 .\scripts\publish.ps1
+
+# インストーラーを作らず、配布フォルダーだけ出す場合
+.\scripts\publish.ps1 -SkipInstaller
 
 # CLI を単一EXEにまとめる場合
 .\scripts\publish.ps1 -SingleFile
 
-# CLI のみ出力する場合
+# CLI のみ出力する場合（インストーラーは自動で省略される）
 .\scripts\publish.ps1 -SkipGui
 ```
 
-出力された `epubfabric.exe`（CLI）と `EpubFabric.App.exe`（GUI）は、.NET のインストールされていない Windows でもそのまま実行できます。
+出力された `EpubFabric.exe`（GUI）と `epubfabric-cli.exe`（CLI）は、.NET のインストールされていない Windows でもそのまま実行できます。
 
 配布用ビルドを作らずに `publish.ps1` を実行した場合は、どのコマンドを先に実行すべきかを示して停止します。
 
 ### インストーラー（Inno Setup）
 
-[Inno Setup 6](https://jrsoftware.org/isinfo.php) がインストールされていれば、`-Installer` でセットアップ EXE も作成できます:
+`publish.ps1` は既定でセットアップ EXE まで作ります。[Inno Setup 6](https://jrsoftware.org/isinfo.php) のインストールが必要です（未インストールの場合はその旨を表示して停止するので、`-SkipInstaller` を付けると配布フォルダーだけ出せます）。
 
 ```powershell
-# 配置とインストーラー作成をまとめて
-.\scripts\publish.ps1 -Installer
-# → publish\installer\EpubFabric-Setup-0.2.1.exe
+.\scripts\publish.ps1
+# → publish\installer\EpubFabric-Setup-0.2.2.exe
 
 # バージョンを明示する場合（既定は Directory.Build.props の <Version>）
-.\scripts\publish.ps1 -Installer -Version 1.0.0
+.\scripts\publish.ps1 -Version 1.0.0
 
 # 既存の配布出力からインストーラーだけ作り直す場合
 .\scripts\publish.ps1 -InstallerOnly
 ```
 
-インストーラーは CLI と GUI の両方を同梱し、日本語/英語対応で、管理者（Program Files）・ユーザー単位（%LocalAppData%\Programs）のどちらでもインストールできます。インストール後はスタートメニューの「EpubFabric」から GUI を起動できます（デスクトップアイコンの作成も選択可）。「PATH 環境変数に追加する」タスクを選ぶと、コマンドプロンプトからそのまま `epubfabric` を実行できます（アンインストール時に除去されます）。
+インストーラーは日本語/英語対応で、管理者（Program Files）・ユーザー単位（%LocalAppData%\Programs）のどちらでもインストールできます。インストール後はスタートメニューの「EpubFabric」から起動できます（デスクトップアイコンの作成も選択可）。
+
+配置は次のとおりで、**本体である GUI をアプリ直下**に、CLI を補助ツールとして `cli\` 配下に置きます。
+
+```
+<インストール先>\
+  EpubFabric.exe          GUI（本体）
+  cli\epubfabric-cli.exe  CLI（補助）
+```
+
+「PATH 環境変数に追加する」タスクを選ぶと、コマンドプロンプトやファイル名を指定して実行から `epubfabric` と打つだけで GUI が起動します（アンインストール時に除去されます）。CLI を使う場合はスタートメニューの「EpubFabric CLI（コマンドプロンプト）」から開きます。
 
 ## 使い方（CLI）
 
@@ -151,7 +170,7 @@ dotnet run --project src\EpubFabric.App
 
 # ビルド済み exe を直接起動する場合（x64 の場合）
 dotnet build src\EpubFabric.App
-.\src\EpubFabric.App\bin\x64\Debug\net10.0-windows10.0.26100.0\win-x64\EpubFabric.App.exe
+.\src\EpubFabric.App\bin\Debug\net10.0-windows10.0.26100.0\win-x64\EpubFabric.exe
 ```
 
 アンパッケージ構成（exe 直接実行）で、WinAppSDK ランタイムも同梱されるため、MSIX の登録や別途ランタイムのインストールは不要です。
@@ -161,7 +180,7 @@ dotnet build src\EpubFabric.App
 ```
 src/
   EpubFabric.Cli          コマンドライン（Pipelineの進捗をコンソールへ表示）
-  EpubFabric.App          Windows GUI（WinUI 3）: PDF選択→オプション→進捗表示付き変換
+  EpubFabric.App          Windows GUI（WinUI 3、実行ファイルは EpubFabric.exe）: PDF選択→オプション→進捗表示付き変換
   EpubFabric.Pipeline     変換パイプラインのオーケストレーション（CLI/GUI共用）
   EpubFabric.Core         データモデル・設定
   EpubFabric.Pdf          PDF読み込み・ラスタライズ・テキスト層抽出（Docnet/PDFium）

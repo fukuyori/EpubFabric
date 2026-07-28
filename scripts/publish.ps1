@@ -3,10 +3,11 @@
 build.ps1 が作ったバイナリを配布物にする（配布フォルダー、および任意でインストーラー）。
 
 .DESCRIPTION
-scripts\build.ps1 -Runtime <RID> でビルド済みの成果物を dotnet publish --no-build で
-publish\EpubFabric.Cli\<runtime>\ と publish\EpubFabric.App\<runtime>\ へ並べ直す。
-出力先の epubfabric.exe / EpubFabric.App.exe をそのままコピーして配布できる。
--Installer を付けると、続けて Inno Setup でセットアップEXEも作る。
+scripts\build.ps1 でビルド済みの成果物を dotnet publish --no-build で
+publish\EpubFabric.Cli\<runtime>\ と publish\EpubFabric.App\<runtime>\ へ並べ直し、
+続けて Inno Setup で publish\installer\ にセットアップEXEを作る。
+配布フォルダーの EpubFabric.exe（GUI）/ epubfabric-cli.exe（CLI）はそのままコピーしても使える。
+インストーラーが不要なときは -SkipInstaller を指定する。
 
 このスクリプトはコンパイルもテストも行わない。ビルドは build.ps1 の担当なので、
 先に次を実行しておくこと:
@@ -30,11 +31,13 @@ CLI を単一EXEにまとめる。
 .PARAMETER SkipGui
 GUI（EpubFabric.App）を省略し、CLI のみ出力する。
 
-.PARAMETER Installer
-Inno Setup（ISCC.exe）でセットアップEXEを publish\installer\ に作る。
-日本語/英語対応で、GUI のスタートメニュー/デスクトップショートカット、
+.PARAMETER SkipInstaller
+インストーラーの作成を省略し、配布フォルダーの出力だけで終える。
+既定では Inno Setup（ISCC.exe）でセットアップEXEを publish\installer\ まで作る。
+インストーラーは日本語/英語対応で、GUI のスタートメニュー/デスクトップショートカット、
 PATH 環境変数への追加（任意タスク）とアンインストール時の除去を行う。
 Inno Setup 6 のインストールが必要: https://jrsoftware.org/isinfo.php
+（-SkipGui を指定した場合は、インストーラーがGUIを同梱できないため自動的に省略する。）
 
 .PARAMETER Version
 インストーラーのバージョン。省略時は Directory.Build.props の <Version> を使う。
@@ -44,8 +47,8 @@ Inno Setup 6 のインストールが必要: https://jrsoftware.org/isinfo.php
 
 .EXAMPLE
 .\scripts\publish.ps1
+.\scripts\publish.ps1 -SkipInstaller
 .\scripts\publish.ps1 -SingleFile
-.\scripts\publish.ps1 -Installer
 .\scripts\publish.ps1 -InstallerOnly -Version 1.0.0
 #>
 [CmdletBinding()]
@@ -54,7 +57,7 @@ param(
     [string]$Configuration = "Release",
     [switch]$SingleFile,
     [switch]$SkipGui,
-    [switch]$Installer,
+    [switch]$SkipInstaller,
     [string]$Version,
     [switch]$InstallerOnly
 )
@@ -87,15 +90,21 @@ $platform = switch -Wildcard ($Runtime) {
     default   { $null }
 }
 
+# インストーラーは既定で作る。GUIを省いた場合は同梱できないため作らない。
+$buildInstaller = -not $SkipInstaller -and -not $SkipGui
+if ($SkipGui -and -not $SkipInstaller) {
+    Write-Host "GUI を省略したため、インストーラーの作成も省略します（インストーラーはCLIとGUIを同梱します）。" -ForegroundColor Yellow
+}
+
 if ($InstallerOnly) {
     # 既存の publish 出力からインストーラーだけを作り直す。
-    $Installer = $true
+    $buildInstaller = $true
     $exePath = Get-ChildItem $outputDirectory -Filter "epubfabric*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-    $guiExePath = Get-ChildItem $guiOutputDirectory -Filter "EpubFabric.App.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+    $guiExePath = Get-ChildItem $guiOutputDirectory -Filter "EpubFabric.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
 }
 else {
 
-Assert-Built (Join-Path $repoRoot "src\EpubFabric.Cli\bin\$Configuration") "epubfabric.dll" "CLI"
+Assert-Built (Join-Path $repoRoot "src\EpubFabric.Cli\bin\$Configuration") "epubfabric-cli.dll" "CLI"
 
 if (Test-Path $outputDirectory) {
     Remove-Item $outputDirectory -Recurse -Force
@@ -141,15 +150,15 @@ if (-not $SkipGui) {
         throw "GUI に対応していないランタイム識別子です: $Runtime"
     }
 
-    Assert-Built (Join-Path $repoRoot "src\EpubFabric.App\bin\$platform\$Configuration") "EpubFabric.App.dll" "GUI"
+    Assert-Built (Join-Path $repoRoot "src\EpubFabric.App\bin\$platform\$Configuration") "EpubFabric.dll" "GUI"
 
     if (Test-Path $guiOutputDirectory) {
         Remove-Item $guiOutputDirectory -Recurse -Force
     }
 
     Write-Host "GUI を配布用にまとめています（$Runtime / $Configuration）..." -ForegroundColor Cyan
-    # PublishTrimmed=false: OllamaClient がリフレクションベースの JSON シリアライズを使うため、
-    # トリミングすると実行時に Ollama 連携が壊れる（IL2026）。配布物では無効化する。
+    # トリミングの可否は EpubFabric.App.csproj 側で決まる（ビルド時に runtimeconfig へ
+    # 焼き込まれるため、--no-build のここでは変えられない）。
     dotnet publish $guiProject `
         --configuration $Configuration `
         --runtime $Runtime `
@@ -158,13 +167,12 @@ if (-not $SkipGui) {
         --no-build `
         --nologo `
         -p:DebugType=none `
-        -p:Platform=$platform `
-        -p:PublishTrimmed=false
+        -p:Platform=$platform
     if ($LASTEXITCODE -ne 0) {
         throw "GUI の publish が失敗しました。build.ps1 -Runtime $Runtime を実行済みか確認してください。"
     }
 
-    $guiExePath = Get-ChildItem $guiOutputDirectory -Filter "EpubFabric.App.exe" | Select-Object -First 1
+    $guiExePath = Get-ChildItem $guiOutputDirectory -Filter "EpubFabric.exe" | Select-Object -First 1
     if ($null -eq $guiExePath) {
         throw "publish 出力に EpubFabric.App.exe が見つかりません: $guiOutputDirectory"
     }
@@ -174,7 +182,7 @@ if (-not $SkipGui) {
 
 # --- インストーラー（任意） -------------------------------------------------
 $setupExe = $null
-if ($Installer) {
+if ($buildInstaller) {
     if (-not $Version) {
         $props = Join-Path $repoRoot "Directory.Build.props"
         $Version = ([xml](Get-Content $props)).Project.PropertyGroup.Version
@@ -193,14 +201,14 @@ if ($Installer) {
         $iscc = (Get-Command iscc -ErrorAction SilentlyContinue)?.Source
     }
     if (-not $iscc) {
-        throw "Inno Setup 6（ISCC.exe）が見つかりません。https://jrsoftware.org/isinfo.php からインストールしてください。"
+        throw "Inno Setup 6（ISCC.exe）が見つかりません。https://jrsoftware.org/isinfo.php からインストールするか、-SkipInstaller を指定してください。"
     }
 
-    if (-not (Test-Path (Join-Path $outputDirectory "epubfabric.exe"))) {
+    if (-not (Test-Path (Join-Path $outputDirectory "epubfabric-cli.exe"))) {
         throw "CLI の配布出力が見つかりません: $outputDirectory"
     }
-    if (-not (Test-Path (Join-Path $guiOutputDirectory "EpubFabric.App.exe"))) {
-        throw "GUI の配布出力が見つかりません: $guiOutputDirectory（インストーラーはCLIとGUIの両方を同梱します）"
+    if (-not (Test-Path (Join-Path $guiOutputDirectory "EpubFabric.exe"))) {
+        throw "GUI の配布出力が見つかりません: $guiOutputDirectory（インストーラーの本体はGUIです）"
     }
 
     $installerDirectory = Join-Path $repoRoot "publish\installer"

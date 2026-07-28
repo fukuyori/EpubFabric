@@ -101,6 +101,42 @@ public sealed class ConversionPipeline
             var reviewRequiredCount = 0;
             var detectedPageModes = new List<WritingMode>();
 
+            string PageImagePath(int pageNumber) =>
+                Path.Combine(workDirectory, $"page-original-{pageNumber:0000}.png");
+
+            // 高品質化の補正値は書籍全体の紙色から決める。そのため先に全ページを
+            // ラスタライズして紙色を測る（この時点で書き出した画像を本処理でも使う）。
+            PageEnhanceProfile? enhanceProfile = null;
+            var prerendered = false;
+            if (pageEnhancer is not null)
+            {
+                Report(0, "紙色を測っています...");
+                var stats = new List<PageEnhanceStats>();
+
+                for (var i = 0; i < pageCount; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var pageNumber = i + 1;
+                    var imagePath = PageImagePath(pageNumber);
+                    pdfService.RenderPageToPng(options.InputPath, pageNumber, imagePath, options.Dpi);
+
+                    try
+                    {
+                        stats.Add(pageEnhancer.Analyze(imagePath));
+                    }
+                    catch (Exception ex)
+                    {
+                        Report(pageNumber, $"警告: 紙色を測れませんでした（{ex.Message}）。");
+                    }
+                }
+
+                prerendered = true;
+                enhanceProfile = PageImageEnhancer.BuildProfile(stats);
+                Report(0, enhanceProfile is null
+                    ? "紙面と判定できるページが少ないため、ページごとの紙色で高品質化します。"
+                    : $"書籍全体の紙色（輝度{enhanceProfile.PaperLuminance:0}）を基準に高品質化します。");
+            }
+
             for (var i = 0; i < pageCount; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -108,8 +144,11 @@ public sealed class ConversionPipeline
                 var pageNumber = i + 1;
                 Report(pageNumber, $"ページ {pageNumber}/{pageCount} を処理しています...");
 
-                var imagePath = Path.Combine(workDirectory, $"page-original-{pageNumber:0000}.png");
-                pdfService.RenderPageToPng(options.InputPath, pageNumber, imagePath, options.Dpi);
+                var imagePath = PageImagePath(pageNumber);
+                if (!prerendered)
+                {
+                    pdfService.RenderPageToPng(options.InputPath, pageNumber, imagePath, options.Dpi);
+                }
 
                 // 高品質化: 紙色正規化・裏写り抑制を適用した画像を、表示（EPUB収録）と
                 // OCR入力の両方に使う。幾何変換を含まないため座標には影響しない。
@@ -120,7 +159,8 @@ public sealed class ConversionPipeline
                     {
                         var enhanceResult = pageEnhancer.Enhance(
                             imagePath,
-                            Path.Combine(workDirectory, $"page-enhanced-{pageNumber:0000}.png"));
+                            Path.Combine(workDirectory, $"page-enhanced-{pageNumber:0000}.png"),
+                            enhanceProfile);
                         if (enhanceResult.Applied)
                         {
                             displayImagePath = enhanceResult.ImagePath;

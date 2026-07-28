@@ -19,8 +19,16 @@ public sealed class ParagraphMerger
     /// <summary>行高さの比がこれを超える行同士は別ブロック（フォントサイズが異なる）とみなす。</summary>
     private const double MaxHeightRatio = 1.4;
 
+    /// <summary>本文行の何倍の高さならドロップキャップ（段落頭の飾り文字）とみなすか。</summary>
+    private const double DropCapHeightRatio = 1.5;
+
+    /// <summary>ドロップキャップとみなす文字数の上限。</summary>
+    private const int DropCapMaxLength = 2;
+
     public List<PageBlock> Merge(List<PageBlock> blocks)
     {
+        blocks = MergeDropCaps(blocks);
+
         var result = new List<PageBlock>();
 
         // 統合の可否は「直前に取り込んだ行」との比較で判定する。統合済みブロックの
@@ -52,6 +60,68 @@ public sealed class ParagraphMerger
 
         return result;
     }
+
+    /// <summary>
+    /// 段落頭の飾り文字（ドロップキャップ）を、直後の行の先頭へ連結する。
+    /// 雑誌の巻頭言などで段落の1文字目を数行分の大きさで組む体裁があり、OCRはこれを
+    /// 独立した行として拾うため、そのままでは「2」と「025年2月…」に分かれてしまう。
+    /// 位置関係だけで判定し、飾り文字の外接矩形は取り込まない（大きな高さを持ち込むと
+    /// 後続の行高さ比較が壊れて、段落統合そのものが止まるため）。
+    /// </summary>
+    private static List<PageBlock> MergeDropCaps(List<PageBlock> blocks)
+    {
+        var lineHeights = blocks
+            .Where(b => b.OcrText.Trim().Length > DropCapMaxLength && b.Bounds.Height > 0)
+            .Select(b => b.Bounds.Height)
+            .OrderBy(h => h)
+            .ToList();
+        if (lineHeights.Count == 0)
+        {
+            return blocks;
+        }
+
+        var medianHeight = lineHeights[lineHeights.Count / 2];
+        var merged = new HashSet<string>();
+        var caps = new List<PageBlock>();
+
+        foreach (var cap in blocks)
+        {
+            var capText = cap.OcrText.Trim();
+            if (capText.Length is 0 or > DropCapMaxLength
+                || cap.IsExcluded
+                || cap.Bounds.Height < medianHeight * DropCapHeightRatio)
+            {
+                continue;
+            }
+
+            // 飾り文字と縦に重なり、その右側から始まる行のうち最も上の行が続きの本文。
+            var target = blocks
+                .Where(b => !ReferenceEquals(b, cap)
+                    && !b.IsExcluded
+                    && !merged.Contains(b.Id)
+                    && b.OcrText.Trim().Length > DropCapMaxLength
+                    && b.Bounds.X >= cap.Bounds.X
+                    && VerticalOverlap(cap.Bounds, b.Bounds) > 0)
+                .OrderBy(b => b.Bounds.Y)
+                .FirstOrDefault();
+
+            if (target is null || target.IsManuallyEdited)
+            {
+                continue;
+            }
+
+            target.OcrText = capText + target.OcrText;
+            target.OcrConfidence = Math.Min(target.OcrConfidence, cap.OcrConfidence);
+            target.RequiresReview |= cap.RequiresReview;
+            merged.Add(target.Id);
+            caps.Add(cap);
+        }
+
+        return caps.Count == 0 ? blocks : blocks.Where(b => !caps.Contains(b)).ToList();
+    }
+
+    private static double VerticalOverlap(BoundingBox a, BoundingBox b) =>
+        Math.Min(a.Y + a.Height, b.Y + b.Height) - Math.Max(a.Y, b.Y);
 
     private static bool CanMerge(PageBlock paragraph, PageBlock lastLine, PageBlock next)
     {

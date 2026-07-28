@@ -3,8 +3,8 @@
 ;
 ; 必須の define:
 ;   AppVersion     - インストーラーのバージョン（例: 1.0.0）
-;   PublishDir     - publish.ps1 の CLI 出力ディレクトリ（epubfabric.exe を含む）
-;   GuiPublishDir  - publish.ps1 の GUI 出力ディレクトリ（EpubFabric.App.exe を含む）
+;   PublishDir     - publish.ps1 の CLI 出力ディレクトリ（epubfabric-cli.exe を含む。{app}\cli へ入る）
+;   GuiPublishDir  - publish.ps1 の GUI 出力ディレクトリ（EpubFabric.exe を含む。{app} 直下へ入る）
 ;   OutputDir      - セットアップEXEの出力先ディレクトリ
 ;   IconFile       - セットアップEXEに使うアイコン（省略時は Inno Setup の既定）
 
@@ -42,7 +42,7 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ; PATH変更を反映させるため、終了時に WM_SETTINGCHANGE を送出させる。
 ChangesEnvironment=yes
-UninstallDisplayIcon={app}\gui\EpubFabric.App.exe
+UninstallDisplayIcon={app}\EpubFabric.exe
 #ifdef IconFile
 SetupIconFile={#IconFile}
 #endif
@@ -52,19 +52,21 @@ Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "addtopath"; Description: "PATH 環境変数に追加する（コマンドプロンプトから epubfabric で実行できるようにする）"
+Name: "addtopath"; Description: "PATH 環境変数に追加する（`epubfabric` と打つだけで起動できるようにする）"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 
 [Files]
-; CLI（epubfabric.exe）はアプリ直下、GUI（EpubFabric.App.exe）は gui\ 配下に分けて配置する。
-; 双方が自己完結型でランタイムDLLの同名ファイルを持つため、混在させない。
-Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
-Source: "{#GuiPublishDir}\*"; DestDir: "{app}\gui"; Flags: recursesubdirs ignoreversion
+; 本体はGUI。アプリ直下（PATHに追加される場所）に置き、`epubfabric` で起動できるようにする。
+; Windowsのファイル名は大文字小文字を区別しないため、EpubFabric.exe が epubfabric で見つかる。
+; CLIは補助ツール（epubfabric-cli.exe）として cli\ 配下に分ける。双方が自己完結型で
+; ランタイムDLLの同名ファイルを持つため、同じフォルダーには混在させない。
+Source: "{#GuiPublishDir}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+Source: "{#PublishDir}\*"; DestDir: "{app}\cli"; Flags: recursesubdirs ignoreversion
 
 [Icons]
-Name: "{group}\EpubFabric"; Filename: "{app}\gui\EpubFabric.App.exe"; WorkingDir: "{app}\gui"
-Name: "{group}\EpubFabric CLI（コマンドプロンプト）"; Filename: "{cmd}"; Parameters: "/k cd /d ""{app}"" && epubfabric.exe"; WorkingDir: "{app}"
-Name: "{autodesktop}\EpubFabric"; Filename: "{app}\gui\EpubFabric.App.exe"; WorkingDir: "{app}\gui"; Tasks: desktopicon
+Name: "{group}\EpubFabric"; Filename: "{app}\EpubFabric.exe"; WorkingDir: "{app}"
+Name: "{group}\EpubFabric CLI（コマンドプロンプト）"; Filename: "{cmd}"; Parameters: "/k cd /d ""{app}\cli"" && epubfabric-cli.exe"; WorkingDir: "{app}\cli"
+Name: "{autodesktop}\EpubFabric"; Filename: "{app}\EpubFabric.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Code]
 function PathRegRootKey: Integer;
