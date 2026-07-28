@@ -29,14 +29,35 @@ PDF（スキャン原稿・テキスト層付きの両方）を、検索・選�
 ```powershell
 git clone https://github.com/fukuyori/EpubFabric.git
 cd EpubFabric
-dotnet build
-dotnet test
+
+# ビルド + テスト（CLI・GUI・テストをまとめて）
+.\scripts\build.ps1
+
+# 構成やテストの絞り込み
+.\scripts\build.ps1 -Configuration Release
+.\scripts\build.ps1 -SkipTests
+.\scripts\build.ps1 -TestFilter ColumnDetectorTests
+.\scripts\build.ps1 -Clean
 ```
+
+`dotnet build` / `dotnet test` を直接使っても構いません。
+
+スクリプトは 2 つで、**コンパイルを行うのは `build.ps1` だけ**です。`publish.ps1` は `--no-build` でその成果物を配布物に仕立てるだけで、コンパイルもテストもしません。
+
+| スクリプト | 役割 | コンパイル |
+|---|---|---|
+| `build.ps1` | ソリューションのビルドとテスト | する |
+| `publish.ps1` | 配布フォルダーへの配置と、`-Installer` でセットアップEXEの作成 | しない |
 
 ## 配布用実行ファイルの作成
 
+`publish.ps1` はコンパイルしないため、先に `build.ps1` へ `-Runtime` を渡して配布用ビルド（自己完結型・.NETランタイム同梱）を作っておきます。
+
 ```powershell
-# 自己完結型（.NETランタイム同梱）の CLI と GUI を publish\ 配下に出力
+# 1) 配布用にビルドする
+.\scripts\build.ps1 -Configuration Release -Runtime win-x64
+
+# 2) 配布フォルダーへまとめる
 #   CLI: publish\EpubFabric.Cli\win-x64\
 #   GUI: publish\EpubFabric.App\win-x64\
 .\scripts\publish.ps1
@@ -44,22 +65,28 @@ dotnet test
 # CLI を単一EXEにまとめる場合
 .\scripts\publish.ps1 -SingleFile
 
-# テストを省略して急ぐ場合
-.\scripts\publish.ps1 -SkipTests
-
 # CLI のみ出力する場合
 .\scripts\publish.ps1 -SkipGui
 ```
 
 出力された `epubfabric.exe`（CLI）と `EpubFabric.App.exe`（GUI）は、.NET のインストールされていない Windows でもそのまま実行できます。
 
+配布用ビルドを作らずに `publish.ps1` を実行した場合は、どのコマンドを先に実行すべきかを示して停止します。
+
 ### インストーラー（Inno Setup）
 
-[Inno Setup 6](https://jrsoftware.org/isinfo.php) がインストールされていれば、セットアップ EXE を作成できます:
+[Inno Setup 6](https://jrsoftware.org/isinfo.php) がインストールされていれば、`-Installer` でセットアップ EXE も作成できます:
 
 ```powershell
-.\scripts\build-installer.ps1 -Version 1.0.0
-# → publish\installer\EpubFabric-Setup-1.0.0.exe
+# 配置とインストーラー作成をまとめて
+.\scripts\publish.ps1 -Installer
+# → publish\installer\EpubFabric-Setup-0.2.1.exe
+
+# バージョンを明示する場合（既定は Directory.Build.props の <Version>）
+.\scripts\publish.ps1 -Installer -Version 1.0.0
+
+# 既存の配布出力からインストーラーだけ作り直す場合
+.\scripts\publish.ps1 -InstallerOnly
 ```
 
 インストーラーは CLI と GUI の両方を同梱し、日本語/英語対応で、管理者（Program Files）・ユーザー単位（%LocalAppData%\Programs）のどちらでもインストールできます。インストール後はスタートメニューの「EpubFabric」から GUI を起動できます（デスクトップアイコンの作成も選択可）。「PATH 環境変数に追加する」タスクを選ぶと、コマンドプロンプトからそのまま `epubfabric` を実行できます（アンインストール時に除去されます）。
