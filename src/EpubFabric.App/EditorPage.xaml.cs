@@ -16,7 +16,7 @@ using Windows.UI;
 namespace EpubFabric_App;
 
 /// <summary>校正画面へ渡す変換結果一式。</summary>
-public sealed record EditorNavigationArgs(EpubFabricProject Project, OutputLayout Layout);
+public sealed record EditorNavigationArgs(EpubFabricProject Project, OutputLayout Layout, bool CoverPageAsImage = false);
 
 /// <summary>
 /// 11.1 メイン画面の3ペイン校正ビュー: 左=ページ一覧、中央=ページ画像+ブロック枠、
@@ -29,6 +29,7 @@ public sealed partial class EditorPage : Page
 
     private EpubFabricProject? _project;
     private OutputLayout _layout;
+    private bool _coverPageAsImage;
     private DocumentPage? _currentPage;
     private PageBlock? _selectedBlock;
     private Rectangle? _selectedRectangle;
@@ -51,6 +52,7 @@ public sealed partial class EditorPage : Page
 
         _project = args.Project;
         _layout = args.Layout;
+        _coverPageAsImage = args.CoverPageAsImage;
         TitleText.Text = _project.Title;
 
         PageList.ItemsSource = _project.Pages
@@ -300,7 +302,9 @@ public sealed partial class EditorPage : Page
             StatusText.Text = "EPUBを書き出しています...";
             var project = _project;
             var layout = _layout;
-            await System.Threading.Tasks.Task.Run(() => new ConversionPipeline().BuildEpub(project, layout, file.Path));
+            var coverPageAsImage = _coverPageAsImage;
+            await System.Threading.Tasks.Task.Run(
+                () => new ConversionPipeline().BuildEpub(project, layout, file.Path, coverPageAsImage: coverPageAsImage));
             StatusText.Text = $"書き出しました: {file.Path}";
         }
         catch (Exception ex)

@@ -1,10 +1,11 @@
 <#
 .SYNOPSIS
-EpubFabric CLI の Windows インストーラー（Inno Setup）を作成する。
+EpubFabric（CLI・GUI）の Windows インストーラー（Inno Setup）を作成する。
 
 .DESCRIPTION
-publish.ps1 で自己完結型の実行ファイル一式を作成した後、Inno Setup（ISCC.exe）で
-セットアップEXEを publish\installer\ に出力する。インストーラーは日本語/英語対応で、
+publish.ps1 で自己完結型の実行ファイル一式（CLI・GUI）を作成した後、
+Inno Setup（ISCC.exe）でセットアップEXEを publish\installer\ に出力する。
+インストーラーは日本語/英語対応で、GUI のスタートメニュー/デスクトップショートカット、
 PATH 環境変数への追加（任意タスク）とアンインストール時の除去を行う。
 
 Inno Setup 6 のインストールが必要: https://jrsoftware.org/isinfo.php
@@ -41,6 +42,7 @@ if (-not $Version) {
     }
 }
 $publishDirectory = Join-Path $repoRoot "publish\EpubFabric.Cli\win-x64"
+$guiPublishDirectory = Join-Path $repoRoot "publish\EpubFabric.App\win-x64"
 $installerDirectory = Join-Path $repoRoot "publish\installer"
 
 $isccCandidates = @(
@@ -65,15 +67,26 @@ if (-not $SkipPublish) {
 if (-not (Test-Path (Join-Path $publishDirectory "epubfabric.exe"))) {
     throw "publish 出力が見つかりません: $publishDirectory（先に scripts\publish.ps1 を実行してください）"
 }
+if (-not (Test-Path (Join-Path $guiPublishDirectory "EpubFabric.App.exe"))) {
+    throw "GUI の publish 出力が見つかりません: $guiPublishDirectory（先に scripts\publish.ps1 を実行してください）"
+}
 
 New-Item -ItemType Directory -Force $installerDirectory | Out-Null
 
 Write-Host "Inno Setup でインストーラーを作成しています..." -ForegroundColor Cyan
-& $iscc `
-    "/DAppVersion=$Version" `
-    "/DPublishDir=$publishDirectory" `
-    "/DOutputDir=$installerDirectory" `
-    (Join-Path $PSScriptRoot "installer.iss")
+$isccArgs = @(
+    "/DAppVersion=$Version",
+    "/DPublishDir=$publishDirectory",
+    "/DGuiPublishDir=$guiPublishDirectory",
+    "/DOutputDir=$installerDirectory"
+)
+
+$iconFile = Join-Path $repoRoot "src\EpubFabric.App\Assets\AppIcon.ico"
+if (Test-Path $iconFile) {
+    $isccArgs += "/DIconFile=$iconFile"
+}
+
+& $iscc @isccArgs (Join-Path $PSScriptRoot "installer.iss")
 if ($LASTEXITCODE -ne 0) {
     throw "ISCC が失敗しました（終了コード: $LASTEXITCODE）。"
 }

@@ -111,6 +111,16 @@ public static class ColumnDetector
         var normalItems = items.Where(i => boundsOf(i).Width <= wideThreshold).ToList();
         var wideItems = items.Where(i => boundsOf(i).Width > wideThreshold).ToList();
 
+        // 1段だけの領域では、行がその段の幅いっぱいに伸びるため「段をまたぐ幅広項目」と
+        // 判定されてしまう。多数派が幅広なら段ではなく既に1段の領域とみなし、分割しない。
+        // （分割すると幅広項目が1行ずつのグループへ解体され、読み順がY座標順に崩れて
+        // 2段組みの左右が交互に並ぶ。）本当に段が分かれている領域では、各行は分割後の
+        // 段の幅に収まるため多数派が幅広になることはない。
+        if (normalItems.Count < MinItemsToSplit || normalItems.Count * 2 < items.Count)
+        {
+            return [items];
+        }
+
         var gutter = FindWidestGutterBand(normalItems, boundsOf, xStart, xEnd);
         if (gutter is null)
         {
@@ -211,6 +221,13 @@ public static class ColumnDetector
         }
 
         var nonCrossingCount = leftCount + rightCount;
+        if (nonCrossingCount == 0)
+        {
+            // 左右に振り分けられる項目が1つもない位置は、空白帯ではなく判定材料がないだけ。
+            // 割合の条件は0件同士でも成立してしまうため、ここで明示的に弾く。
+            return false;
+        }
+
         return leftCount >= nonCrossingCount * MinColumnShare
             && rightCount >= nonCrossingCount * MinColumnShare;
     }

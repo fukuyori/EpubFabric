@@ -8,7 +8,7 @@ PDF（スキャン原稿・テキスト層付きの両方）を、検索・選�
 
 - **固定レイアウト EPUB**（既定）: PDF の 1 ページを EPUB の 1 ページとして収録。ページ画像の上に、座標付きの透明テキスト層を重ねるため、見た目は原本のまま検索・選択・読み上げができる。1 ページ目は表紙（cover-image）として設定される
 - **縦書き対応**: 書字方向をページ単位に自動判定。縦書きの本は右綴じ・右の行から左への読み順・縦書きテキスト層（`writing-mode: vertical-rl`）で出力。縦書き誌に混在する横書きページも正しく処理
-- **リフロー型 EPUB**: レイアウト解析（見出し・段組み・図版・キャプション検出）と段落統合で章構造を持つ EPUB を生成
+- **リフロー型 EPUB**: レイアウト解析（見出し・段組み・図版・キャプション検出）と段落統合で章構造を持つ EPUB を生成。`--cover-image` を付けると 1 ページ目だけはテキスト化せずページ画像のまま表紙として収録する（表紙は装飾文字が多く OCR の誤読が本文へ混入しやすいため）
 - **OCR**: RapidOcrNet（PP-OCRv6 多言語 ONNX モデル）によるローカル OCR。日本語対応。モデルは初回実行時に自動ダウンロード
   - 傾き補正（deskew）: OCR 専用の補正画像で認識し、座標は元画像へ逆変換（表示画像は無加工）
   - 低信頼のゴミ行フィルタ: 表紙・飾りページの誤読が本文へ混入するのを防ぐ
@@ -36,17 +36,22 @@ dotnet test
 ## 配布用実行ファイルの作成
 
 ```powershell
-# 自己完結型（.NETランタイム同梱）を publish\EpubFabric.Cli\win-x64\ に出力
+# 自己完結型（.NETランタイム同梱）の CLI と GUI を publish\ 配下に出力
+#   CLI: publish\EpubFabric.Cli\win-x64\
+#   GUI: publish\EpubFabric.App\win-x64\
 .\scripts\publish.ps1
 
-# 単一EXEにまとめる場合
+# CLI を単一EXEにまとめる場合
 .\scripts\publish.ps1 -SingleFile
 
 # テストを省略して急ぐ場合
 .\scripts\publish.ps1 -SkipTests
+
+# CLI のみ出力する場合
+.\scripts\publish.ps1 -SkipGui
 ```
 
-出力された `epubfabric.exe` は .NET のインストールされていない Windows でもそのまま実行できます。
+出力された `epubfabric.exe`（CLI）と `EpubFabric.App.exe`（GUI）は、.NET のインストールされていない Windows でもそのまま実行できます。
 
 ### インストーラー（Inno Setup）
 
@@ -57,7 +62,7 @@ dotnet test
 # → publish\installer\EpubFabric-Setup-1.0.0.exe
 ```
 
-インストーラーは日本語/英語対応で、管理者（Program Files）・ユーザー単位（%LocalAppData%\Programs）のどちらでもインストールできます。「PATH 環境変数に追加する」タスクを選ぶと、コマンドプロンプトからそのまま `epubfabric` を実行できます（アンインストール時に除去されます）。
+インストーラーは CLI と GUI の両方を同梱し、日本語/英語対応で、管理者（Program Files）・ユーザー単位（%LocalAppData%\Programs）のどちらでもインストールできます。インストール後はスタートメニューの「EpubFabric」から GUI を起動できます（デスクトップアイコンの作成も選択可）。「PATH 環境変数に追加する」タスクを選ぶと、コマンドプロンプトからそのまま `epubfabric` を実行できます（アンインストール時に除去されます）。
 
 ## 使い方（CLI）
 
@@ -70,6 +75,9 @@ dotnet run --project src\EpubFabric.Cli -- convert input.pdf --output book.epub
 
 # リフロー型EPUB生成
 dotnet run --project src\EpubFabric.Cli -- convert input.pdf --layout reflow
+
+# リフロー型で、1ページ目はテキスト化せず表紙画像として収録
+dotnet run --project src\EpubFabric.Cli -- convert input.pdf --layout reflow --cover-image
 
 # スキャン紙面の高品質化（紙色正規化・裏写り抑制）を有効化
 dotnet run --project src\EpubFabric.Cli -- convert input.pdf --enhance
@@ -96,12 +104,30 @@ dotnet run --project src\EpubFabric.Cli -- export book.efproj --format epub
 | `--layout <fixed\|reflow>` | `fixed` | 出力レイアウト |
 | `--dpi <dpi>` | `300` | ページラスタライズ解像度 |
 | `--enhance` | 無効 | スキャン紙面の高品質化（紙色正規化・裏写り抑制） |
+| `--cover-image` | 無効 | リフロー型で1ページ目をテキスト化せず表紙画像として収録（固定レイアウトでは元から全ページが画像のため無視） |
 | `--vertical` / `--horizontal` | 自動判定 | 書字方向の強制指定。既定では行の形状からページ単位に自動判定し、縦書きの本は右綴じ（右→左のページ送り）・右→左の読み順・縦書きテキスト層で出力される |
 | `--image-quality <1-100>` | `85` | ページ画像のJPEG品質（固定レイアウト） |
 | `--max-image-size <px>` | `2200` | ページ画像の長辺上限。`0`で縮小なし |
 | `--ollama` | 無効 | Ollamaによる意味分類とOCR校正 |
 | `--ollama-model <model>` | `gemma4:12b` | 使用モデル |
 | `--ollama-endpoint <url>` | `http://localhost:11434` | Ollamaサーバー |
+
+## 使い方（GUI）
+
+WinUI 3 のデスクトップアプリ（`EpubFabric.App`）から、PDF 選択→オプション設定→進捗表示付き変換が行えます。インストーラーでインストールした場合は、スタートメニューの「EpubFabric」（またはデスクトップアイコン）から起動します。
+
+開発時の起動:
+
+```powershell
+# 開発時はそのまま起動できる
+dotnet run --project src\EpubFabric.App
+
+# ビルド済み exe を直接起動する場合（x64 の場合）
+dotnet build src\EpubFabric.App
+.\src\EpubFabric.App\bin\x64\Debug\net10.0-windows10.0.26100.0\win-x64\EpubFabric.App.exe
+```
+
+アンパッケージ構成（exe 直接実行）で、WinAppSDK ランタイムも同梱されるため、MSIX の登録や別途ランタイムのインストールは不要です。
 
 ## プロジェクト構成
 

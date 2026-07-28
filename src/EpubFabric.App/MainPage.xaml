@@ -57,6 +57,7 @@
             </ComboBox>
             <CheckBox x:Name="EnhanceCheck" Content="紙面の高品質化" VerticalAlignment="Bottom" />
             <CheckBox x:Name="ForceOcrCheck" Content="常にOCR（テキスト層を無視）" VerticalAlignment="Bottom" />
+            <CheckBox x:Name="CoverImageCheck" Content="表紙をページ画像で収録（リフロー時）" VerticalAlignment="Bottom" />
             <CheckBox x:Name="OllamaCheck" Content="Ollama 分類・校正" VerticalAlignment="Bottom" Checked="OnOllamaCheckChanged" Unchecked="OnOllamaCheckChanged" />
             <TextBox x:Name="OllamaModelBox" Header="Ollama モデル" Text="gemma4:12b" MinWidth="160" IsEnabled="False" />
         </StackPanel>

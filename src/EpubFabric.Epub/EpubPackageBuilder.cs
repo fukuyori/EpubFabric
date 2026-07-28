@@ -11,6 +11,8 @@ namespace EpubFabric.Epub;
 /// </summary>
 public sealed class EpubPackageBuilder
 {
+    private const string CoverXhtmlFileName = "cover.xhtml";
+
     private static readonly XNamespace Xhtml = "http://www.w3.org/1999/xhtml";
     private static readonly XNamespace EpubOps = "http://www.idpf.org/2007/ops";
     private static readonly XNamespace Opf = "http://www.idpf.org/2007/opf";
@@ -18,6 +20,17 @@ public sealed class EpubPackageBuilder
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
     private readonly EpubXhtmlGenerator _xhtmlGenerator = new();
+    private readonly PageImageTranscoder? _coverTranscoder;
+
+    /// <param name="coverImage">
+    /// 1ページ目をテキスト化せず表紙画像として収録する場合の再圧縮設定。nullで表紙を作らない。
+    /// 表紙はOCRしても意味のある本文にならず（装飾文字・大見出しの誤読が本文へ混入する）、
+    /// 紙面をそのまま見せる方が実用的なため、画像として収録できるようにしている。
+    /// </param>
+    public EpubPackageBuilder(PageImageTranscoder? coverImage = null)
+    {
+        _coverTranscoder = coverImage;
+    }
 
     public void Build(
         EpubFabricProject project,
@@ -39,6 +52,8 @@ public sealed class EpubPackageBuilder
             .Distinct()
             .ToList();
 
+        var cover = PrepareCover(project);
+
         using var zip = ZipFile.Open(outputEpubPath, ZipArchiveMode.Create);
 
         // mimetypeは無圧縮でZIP先頭に配置する（12.7）。
@@ -49,9 +64,25 @@ public sealed class EpubPackageBuilder
         }
 
         WriteXml(zip, "META-INF/container.xml", BuildContainerXml());
-        WriteXml(zip, "EPUB/package.opf", BuildPackageOpf(project, chapters, images));
-        WriteXml(zip, "EPUB/nav.xhtml", BuildNavXhtml(project.Title, chapters, blocksById));
+        WriteXml(zip, "EPUB/package.opf", BuildPackageOpf(project, chapters, images, cover));
+        WriteXml(zip, "EPUB/nav.xhtml", BuildNavXhtml(project.Title, chapters, blocksById, cover));
         WriteText(zip, "EPUB/styles/book.css", EpubStylesheet.Content);
+
+        if (cover is not null)
+        {
+            WriteXml(zip, $"EPUB/text/{CoverXhtmlFileName}", BuildCoverXhtml(project, cover.FileName));
+
+            if (cover.Bytes is not null)
+            {
+                var entry = zip.CreateEntry($"EPUB/images/{cover.FileName}", CompressionLevel.Optimal);
+                using var stream = entry.Open();
+                stream.Write(cover.Bytes);
+            }
+            else
+            {
+                zip.CreateEntryFromFile(cover.SourcePath, $"EPUB/images/{cover.FileName}", CompressionLevel.Optimal);
+            }
+        }
 
         for (var i = 0; i < chapters.Count; i++)
         {
@@ -63,6 +94,56 @@ public sealed class EpubPackageBuilder
         {
             zip.CreateEntryFromFile(imagePath, $"EPUB/images/{Path.GetFileName(imagePath)}", CompressionLevel.Optimal);
         }
+    }
+
+    /// <summary>1ページ目のページ画像を表紙として整える。無効時・画像が無い場合はnull。</summary>
+    private PreparedPageImage? PrepareCover(EpubFabricProject project)
+    {
+        if (_coverTranscoder is null)
+        {
+            return null;
+        }
+
+        var firstPage = project.Pages.OrderBy(p => p.PageNumber).FirstOrDefault();
+        if (firstPage is null)
+        {
+            return null;
+        }
+
+        var sourcePath = PageImageTranscoder.DisplayImagePathOf(firstPage);
+        return string.IsNullOrEmpty(sourcePath) || !File.Exists(sourcePath)
+            ? null
+            : _coverTranscoder.Prepare(sourcePath, "cover");
+    }
+
+    /// <summary>
+    /// 表紙ページのXHTML。リーダーごとの余白・拡大縮小の差を避けるため、画像は
+    /// ビューポートに収まる範囲で最大化する（縦横比は保つ）。
+    /// </summary>
+    private static XDocument BuildCoverXhtml(EpubFabricProject project, string imageFileName)
+    {
+        var title = XmlTextSanitizer.Sanitize(project.Title);
+
+        var html = new XElement(
+            Xhtml + "html",
+            new XAttribute(XNamespace.Xmlns + "epub", EpubOps),
+            new XAttribute(XNamespace.Xml + "lang", project.Language),
+            new XElement(
+                Xhtml + "head",
+                new XElement(Xhtml + "title", title),
+                new XElement(Xhtml + "link", new XAttribute("rel", "stylesheet"), new XAttribute("type", "text/css"), new XAttribute("href", "../styles/book.css"))),
+            new XElement(
+                Xhtml + "body",
+                new XAttribute("class", "cover"),
+                new XElement(
+                    Xhtml + "section",
+                    new XAttribute(EpubOps + "type", "cover"),
+                    new XElement(
+                        Xhtml + "img",
+                        new XAttribute("src", $"../images/{imageFileName}"),
+                        new XAttribute("alt", title)))));
+
+        return new XDocument(new XDeclaration("1.0", "UTF-8", null), html);
     }
 
     private static string ChapterFileName(int index) => $"chapter-{index + 1:000}.xhtml";
@@ -91,13 +172,32 @@ public sealed class EpubPackageBuilder
                         new XAttribute("media-type", "application/oebps-package+xml")))));
     }
 
-    private static XDocument BuildPackageOpf(EpubFabricProject project, IReadOnlyList<DocumentChapter> chapters, IReadOnlyList<string> images)
+    private static XDocument BuildPackageOpf(
+        EpubFabricProject project,
+        IReadOnlyList<DocumentChapter> chapters,
+        IReadOnlyList<string> images,
+        PreparedPageImage? cover)
     {
         var manifestItems = new List<XElement>
         {
             new(Opf + "item", new XAttribute("id", "nav"), new XAttribute("href", "nav.xhtml"), new XAttribute("media-type", "application/xhtml+xml"), new XAttribute("properties", "nav")),
             new(Opf + "item", new XAttribute("id", "css"), new XAttribute("href", "styles/book.css"), new XAttribute("media-type", "text/css")),
         };
+
+        if (cover is not null)
+        {
+            manifestItems.Add(new XElement(
+                Opf + "item",
+                new XAttribute("id", "cover-image"),
+                new XAttribute("href", $"images/{cover.FileName}"),
+                new XAttribute("media-type", PageImageTranscoder.MediaTypeOf(cover.FileName)),
+                new XAttribute("properties", "cover-image")));
+            manifestItems.Add(new XElement(
+                Opf + "item",
+                new XAttribute("id", "cover"),
+                new XAttribute("href", $"text/{CoverXhtmlFileName}"),
+                new XAttribute("media-type", "application/xhtml+xml")));
+        }
 
         for (var i = 0; i < images.Count; i++)
         {
@@ -110,6 +210,11 @@ public sealed class EpubPackageBuilder
         }
 
         var spineItems = new List<XElement>();
+
+        if (cover is not null)
+        {
+            spineItems.Add(new XElement(Opf + "itemref", new XAttribute("idref", "cover")));
+        }
 
         for (var i = 0; i < chapters.Count; i++)
         {
@@ -139,6 +244,12 @@ public sealed class EpubPackageBuilder
             metadata.Add(new XElement(Dc + "publisher", XmlTextSanitizer.Sanitize(project.Publisher)));
         }
 
+        if (cover is not null)
+        {
+            // EPUB 2世代のリーダー・書棚アプリ向けの表紙互換表記。
+            metadata.Add(new XElement(Opf + "meta", new XAttribute("name", "cover"), new XAttribute("content", "cover-image")));
+        }
+
         metadata.Add(new XElement(
             Opf + "meta",
             new XAttribute("property", "dcterms:modified"),
@@ -164,7 +275,8 @@ public sealed class EpubPackageBuilder
     private static XDocument BuildNavXhtml(
         string title,
         IReadOnlyList<DocumentChapter> chapters,
-        IReadOnlyDictionary<string, PageBlock> blocksById)
+        IReadOnlyDictionary<string, PageBlock> blocksById,
+        PreparedPageImage? cover)
     {
         var safeTitle = XmlTextSanitizer.Sanitize(title);
         var listItems = chapters.Select((chapter, i) =>
@@ -192,12 +304,22 @@ public sealed class EpubPackageBuilder
             return item;
         });
 
+        // 表紙を目次の先頭に置き、本文から表紙へ戻れるようにする。
+        var coverItem = cover is null
+            ? []
+            : new[]
+            {
+                new XElement(
+                    Xhtml + "li",
+                    new XElement(Xhtml + "a", new XAttribute("href", $"text/{CoverXhtmlFileName}"), "表紙")),
+            };
+
         var nav = new XElement(
             Xhtml + "nav",
             new XAttribute(EpubOps + "type", "toc"),
             new XAttribute("id", "toc"),
             new XElement(Xhtml + "h1", safeTitle),
-            new XElement(Xhtml + "ol", listItems));
+            new XElement(Xhtml + "ol", coverItem.Concat(listItems)));
 
         var html = new XElement(
             Xhtml + "html",

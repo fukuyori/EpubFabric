@@ -94,4 +94,52 @@ public sealed class ColumnDetectorTests
     {
         Assert.Empty(ColumnDetector.DetectColumns(new List<Item>(), i => i.Bounds));
     }
+
+    /// <summary>
+    /// 雑誌本文のように行数が多く、各行が段の幅いっぱいに伸びる2段組み。段に分割した後、
+    /// 段の中の行は「その段の幅の半分」を超えるため、再帰の2段目で段をまたぐ幅広項目と
+    /// 誤判定されて1行ずつのグループへ解体され、読み順が左右交互に崩れる不具合があった。
+    /// </summary>
+    [Fact]
+    public void 行が段の幅いっぱいの二段組みでも左右が交互にならない()
+    {
+        var items = new List<Item>();
+        for (var row = 0; row < 40; row++)
+        {
+            var y = 0.06 + row * 0.02;
+            items.Add(new Item($"左{row + 1}", new BoundingBox(0.07, y, 0.41, 0.015)));
+            items.Add(new Item($"右{row + 1}", new BoundingBox(0.51, y, 0.41, 0.015)));
+        }
+
+        var expected = Enumerable.Range(1, 40).Select(i => $"左{i}")
+            .Concat(Enumerable.Range(1, 40).Select(i => $"右{i}"))
+            .ToList();
+
+        Assert.Equal(expected, Order(items));
+    }
+
+    /// <summary>
+    /// 段落末尾や小見出しのように段の幅より短い行が段内に混ざっていても、段の中を
+    /// さらに分割してはならない（短い行だけで再分割の条件が成立してしまう事故の回帰）。
+    /// </summary>
+    [Fact]
+    public void 段内に短い行が混ざっても段はさらに分割されない()
+    {
+        var items = new List<Item>();
+        for (var row = 0; row < 20; row++)
+        {
+            var y = 0.06 + row * 0.04;
+
+            // 5行ごとに段落末尾の短い行を置く。
+            var leftWidth = row % 5 == 4 ? 0.18 : 0.41;
+            var rightWidth = row % 5 == 2 ? 0.15 : 0.41;
+            items.Add(new Item($"左{row + 1}", new BoundingBox(0.07, y, leftWidth, 0.015)));
+            items.Add(new Item($"右{row + 1}", new BoundingBox(0.51, y, rightWidth, 0.015)));
+        }
+
+        var groups = ColumnDetector.DetectColumns(items, i => i.Bounds);
+
+        Assert.Equal(2, groups.Count);
+        Assert.All(groups, group => Assert.Equal(20, group.Count));
+    }
 }

@@ -22,6 +22,7 @@ public sealed partial class MainPage : Page
     private string? _lastOutputPath;
     private EpubFabricProject? _lastProject;
     private OutputLayout _lastLayout;
+    private bool _lastCoverPageAsImage;
 
     public MainPage()
     {
@@ -166,6 +167,8 @@ public sealed partial class MainPage : Page
             }
         });
 
+        var coverPageAsImage = CoverImageCheck.IsChecked == true;
+
         try
         {
             var token = _cancellation.Token;
@@ -175,7 +178,7 @@ public sealed partial class MainPage : Page
                     var pipeline = new ConversionPipeline();
                     var (project, _) = await pipeline.BuildProjectAsync(options, progress, token);
                     token.ThrowIfCancellationRequested();
-                    pipeline.BuildEpub(project, layout, outputPath);
+                    pipeline.BuildEpub(project, layout, outputPath, coverPageAsImage: coverPageAsImage);
                     return project;
                 },
                 token);
@@ -183,6 +186,7 @@ public sealed partial class MainPage : Page
             _lastOutputPath = outputPath;
             _lastProject = convertedProject;
             _lastLayout = layout;
+            _lastCoverPageAsImage = coverPageAsImage;
             OpenFolderButton.IsEnabled = true;
             EditorButton.IsEnabled = true;
             ConvertProgressBar.Value = 100;
@@ -226,7 +230,7 @@ public sealed partial class MainPage : Page
     {
         if (_lastProject is not null)
         {
-            Frame.Navigate(typeof(EditorPage), new EditorNavigationArgs(_lastProject, _lastLayout));
+            Frame.Navigate(typeof(EditorPage), new EditorNavigationArgs(_lastProject, _lastLayout, _lastCoverPageAsImage));
         }
     }
 

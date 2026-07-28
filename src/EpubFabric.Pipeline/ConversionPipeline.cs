@@ -374,21 +374,38 @@ public sealed class ConversionPipeline
     }
 
     /// <summary>構築済みプロジェクトからEPUBを書き出す。</summary>
+    /// <param name="coverPageAsImage">
+    /// リフロー型で1ページ目をテキスト化せず表紙画像として収録する。固定レイアウトでは
+    /// 元から全ページが画像のため無視される。
+    /// </param>
     public void BuildEpub(
         EpubFabricProject project,
         OutputLayout layout,
         string outputPath,
-        PageImageEncodingOptions? imageOptions = null)
+        PageImageEncodingOptions? imageOptions = null,
+        bool coverPageAsImage = false)
     {
+        imageOptions ??= new PageImageEncodingOptions();
+
         if (layout == OutputLayout.Fixed)
         {
-            imageOptions ??= new PageImageEncodingOptions();
             new FixedLayoutEpubPackageBuilder(imageOptions.JpegQuality, imageOptions.MaxSideLength).Build(project, outputPath);
             return;
         }
 
-        var chapters = new DocumentBuilder().BuildChapters(project.Pages, project.Title);
-        var blocksById = project.Pages.SelectMany(p => p.Blocks).ToDictionary(b => b.Id);
-        new EpubPackageBuilder().Build(project, chapters, blocksById, outputPath);
+        // 表紙を画像で収録するなら、1ページ目の文字は本文へ入れない（表紙のOCRは
+        // 装飾文字の誤読が多く、そのまま本文化すると第1章の先頭が荒れる）。
+        var textPages = coverPageAsImage && project.Pages.Count > 1
+            ? project.Pages.OrderBy(p => p.PageNumber).Skip(1).ToList()
+            : project.Pages;
+
+        var chapters = new DocumentBuilder().BuildChapters(textPages, project.Title);
+        var blocksById = textPages.SelectMany(p => p.Blocks).ToDictionary(b => b.Id);
+
+        var coverTranscoder = coverPageAsImage
+            ? new PageImageTranscoder(imageOptions.JpegQuality, imageOptions.MaxSideLength)
+            : null;
+
+        new EpubPackageBuilder(coverTranscoder).Build(project, chapters, blocksById, outputPath);
     }
 }

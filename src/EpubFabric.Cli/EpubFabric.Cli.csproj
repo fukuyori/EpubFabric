@@ -25,6 +25,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>epubfabric</AssemblyName>
+    <!-- GUIと同じアイコンを埋め込む。アイコンの実体はGUI側が実行時にも読むためAssetsに置いている。 -->
+    <ApplicationIcon>..\EpubFabric.App\Assets\AppIcon.ico</ApplicationIcon>
   </PropertyGroup>
 
 </Project>
