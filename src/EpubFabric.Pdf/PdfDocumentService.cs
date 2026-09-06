@@ -77,10 +77,12 @@ public sealed class PdfDocumentService
             lines.AddRange(SplitClusterIntoSegments(cluster, pageWidth, pageHeight));
         }
 
-        return lines
+        var orderedLines = lines
             .OrderBy(l => l.Bounds.Y)
             .ThenBy(l => l.Bounds.X)
             .ToList();
+
+        return PdfTextLineReconciler.Reconcile(orderedLines, page.GetText());
     }
 
     /// <summary>縦方向に重なる文字同士を同じ行としてまとめる。</summary>

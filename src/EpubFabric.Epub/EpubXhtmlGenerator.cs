@@ -12,7 +12,11 @@ public sealed class EpubXhtmlGenerator
     private static readonly XNamespace Xhtml = "http://www.w3.org/1999/xhtml";
     private static readonly XNamespace EpubOps = "http://www.idpf.org/2007/ops";
 
-    public XDocument GenerateChapter(DocumentChapter chapter, IReadOnlyDictionary<string, PageBlock> blocksById)
+    public XDocument GenerateChapter(
+        DocumentChapter chapter,
+        IReadOnlyDictionary<string, PageBlock> blocksById,
+        string language = "ja",
+        WritingMode writingMode = WritingMode.Horizontal)
     {
         var chapterTitle = XmlTextSanitizer.Sanitize(chapter.Title);
         var titleTag = $"h{Math.Clamp(chapter.HeadingLevel, 1, 6)}";
@@ -26,6 +30,7 @@ public sealed class EpubXhtmlGenerator
         var html = new XElement(
             Xhtml + "html",
             new XAttribute(XNamespace.Xmlns + "epub", EpubOps),
+            new XAttribute(XNamespace.Xml + "lang", language),
             new XElement(
                 Xhtml + "head",
                 new XElement(Xhtml + "title", chapterTitle),
@@ -35,6 +40,11 @@ public sealed class EpubXhtmlGenerator
                     new XAttribute("type", "text/css"),
                     new XAttribute("href", "../styles/book.css"))),
             body);
+
+        if (writingMode == WritingMode.Vertical)
+        {
+            html.SetAttributeValue("class", "vertical");
+        }
 
         return new XDocument(new XDeclaration("1.0", "UTF-8", null), html);
     }

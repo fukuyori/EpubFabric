@@ -50,6 +50,27 @@ public class HeuristicLayoutAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzePage_VerticalText_ReadsRightLineBeforeLeftLineAndKeepsOriginalBounds()
+    {
+        var rightBounds = new BoundingBox(0.70, 0.10, 0.03, 0.50);
+        var lines = new List<TextLine>
+        {
+            new(rightBounds, "右側の縦書き本文", 0.9),
+            new(new BoundingBox(0.65, 0.10, 0.03, 0.50), "左隣の縦書き本文", 0.9),
+        };
+
+        var blocks = _analyzer.AnalyzePage(
+            pageNumber: 1,
+            lines,
+            writingMode: WritingMode.Vertical);
+
+        Assert.Equal(
+            ["右側の縦書き本文", "左隣の縦書き本文"],
+            blocks.OrderBy(block => block.ReadingOrder).Select(block => block.OcrText));
+        Assert.Equal(rightBounds, blocks.Single(block => block.OcrText == "右側の縦書き本文").Bounds);
+    }
+
+    [Fact]
     public void AnalyzePage_HugeTextMidPage_IsDecorativeNotChapterTitle()
     {
         // 挿絵・作例内の巨大な文字（漫画の台詞など）はページ上部にないため章タイトルにしない。
@@ -142,6 +163,26 @@ public class HeuristicLayoutAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzePage_TextDominatedFigureCandidate_KeepsReflowText()
+    {
+        var lines = new List<TextLine>
+        {
+            new(new BoundingBox(0.12, 0.12, 0.6, 0.04), "Revision 0.1 16 November 2002", 0.9),
+            new(new BoundingBox(0.12, 0.17, 0.6, 0.04), "First manuscript release.", 0.9),
+        };
+        var regions = new List<NonTextRegion>
+        {
+            new(new BoundingBox(0.10, 0.10, 0.65, 0.13), NonTextRegionKind.Figure),
+        };
+
+        var blocks = _analyzer.AnalyzePage(pageNumber: 1, lines, regions);
+
+        Assert.DoesNotContain(blocks, block => block.Type == BlockType.Figure);
+        Assert.Contains(blocks, block => block.OcrText == "Revision 0.1 16 November 2002");
+        Assert.Contains(blocks, block => block.OcrText == "First manuscript release.");
+    }
+
+    [Fact]
     public void AnalyzePage_BoldShortLineWithBodyHeight_IsClassifiedAsSubheading()
     {
         // 高さは本文と同じだがインク密度が明確に高い短行 = ゴシック太字見出し（0b(c)）。
@@ -180,6 +221,23 @@ public class HeuristicLayoutAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzePage_DenseShortSentenceEndingWithPeriod_IsNotSubheading()
+    {
+        var lines = new List<TextLine>
+        {
+            new(new BoundingBox(0.1, 0.10, 0.2, 0.03), "definition.", 0.9, TextSourceKind.PdfTextLayer, InkDensity: 0.30),
+            new(new BoundingBox(0.1, 0.15, 0.7, 0.03), "Ordinary body text one.", 0.9, TextSourceKind.PdfTextLayer, InkDensity: 0.15),
+            new(new BoundingBox(0.1, 0.19, 0.7, 0.03), "Ordinary body text two.", 0.9, TextSourceKind.PdfTextLayer, InkDensity: 0.16),
+            new(new BoundingBox(0.1, 0.23, 0.7, 0.03), "Ordinary body text three.", 0.9, TextSourceKind.PdfTextLayer, InkDensity: 0.14),
+            new(new BoundingBox(0.1, 0.27, 0.7, 0.03), "Ordinary body text four.", 0.9, TextSourceKind.PdfTextLayer, InkDensity: 0.15),
+        };
+
+        var block = _analyzer.AnalyzePage(pageNumber: 1, lines).Single(b => b.OcrText == "definition.");
+
+        Assert.Equal(BlockType.Body, block.Type);
+    }
+
+    [Fact]
     public void AnalyzePage_ShortLineNearBottomAllDigits_IsClassifiedAsPageNumberAndExcluded()
     {
         var lines = new List<TextLine>
@@ -197,6 +255,8 @@ public class HeuristicLayoutAnalyzerTests
 
     [Theory]
     [InlineData("1. INTRODUCTION", BlockType.ChapterTitle, 1)]
+    [InlineData("Chapter 1. Philosophy", BlockType.ChapterTitle, 1)]
+    [InlineData("Part IV. Community", BlockType.ChapterTitle, 1)]
     [InlineData("1.1 FORTH LANGUAGE FEATURES", BlockType.SectionHeading, 2)]
     [InlineData("3.2.1 Stack Operations", BlockType.Subheading, 3)]
     [InlineData("Preface to the Third Edition", BlockType.ChapterTitle, 1)]
@@ -224,6 +284,21 @@ public class HeuristicLayoutAnalyzerTests
             new(new BoundingBox(0.1, 0.20, 0.6, 0.03), text, 0.9),
             new(new BoundingBox(0.1, 0.30, 0.7, 0.03), "Ordinary body text on this page.", 0.9),
             new(new BoundingBox(0.1, 0.34, 0.7, 0.03), "Another ordinary body line follows.", 0.9),
+        };
+
+        var block = _analyzer.AnalyzePage(pageNumber: 1, lines).Single(b => b.OcrText == text);
+
+        Assert.Equal(BlockType.Body, block.Type);
+    }
+
+    [Fact]
+    public void AnalyzePage_ChapterReferenceSentence_IsNotPromotedToChapterTitle()
+    {
+        var text = "Chapter 6 (Multiprogramming); here, we examine the consequences.";
+        var lines = new List<TextLine>
+        {
+            new(new BoundingBox(0.1, 0.20, 0.7, 0.03), text, 0.9),
+            new(new BoundingBox(0.1, 0.24, 0.7, 0.03), "Ordinary body text follows here.", 0.9),
         };
 
         var block = _analyzer.AnalyzePage(pageNumber: 1, lines).Single(b => b.OcrText == text);

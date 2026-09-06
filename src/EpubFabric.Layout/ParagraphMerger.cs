@@ -17,7 +17,7 @@ public sealed class ParagraphMerger
     private const double IndentRatio = 0.9;
 
     /// <summary>行高さの比がこれを超える行同士は別ブロック（フォントサイズが異なる）とみなす。</summary>
-    private const double MaxHeightRatio = 1.4;
+    private const double MaxHeightRatio = 1.6;
 
     /// <summary>本文行の何倍の高さならドロップキャップ（段落頭の飾り文字）とみなすか。</summary>
     private const double DropCapHeightRatio = 1.5;
@@ -25,9 +25,9 @@ public sealed class ParagraphMerger
     /// <summary>ドロップキャップとみなす文字数の上限。</summary>
     private const int DropCapMaxLength = 2;
 
-    public List<PageBlock> Merge(List<PageBlock> blocks)
+    public List<PageBlock> Merge(List<PageBlock> blocks, WritingMode writingMode = WritingMode.Horizontal)
     {
-        blocks = MergeDropCaps(blocks);
+        blocks = MergeDropCaps(blocks, writingMode);
 
         var result = new List<PageBlock>();
 
@@ -39,7 +39,7 @@ public sealed class ParagraphMerger
         {
             var previous = result.Count > 0 ? result[^1] : null;
 
-            if (previous is not null && lastLine is not null && CanMerge(previous, lastLine, block))
+            if (previous is not null && lastLine is not null && CanMerge(previous, lastLine, block, writingMode))
             {
                 previous.OcrText = JoinLineTexts(previous.OcrText, block.OcrText);
                 previous.Bounds = Union(previous.Bounds, block.Bounds);
@@ -62,17 +62,51 @@ public sealed class ParagraphMerger
     }
 
     /// <summary>
+    /// ページ末尾で途切れ、次ページの先頭から小文字で続く本文段落を連結する。
+    /// ページ単位解析のままでは、改ページ位置ごとに不要な &lt;p&gt; が生じるため。
+    /// </summary>
+    public int MergeAcrossPages(IReadOnlyList<DocumentPage> pages)
+    {
+        var mergedCount = 0;
+
+        for (var i = 1; i < pages.Count; i++)
+        {
+            var previous = pages[i - 1].Blocks
+                .Where(block => !block.IsExcluded)
+                .OrderBy(block => block.ReadingOrder)
+                .LastOrDefault();
+            var next = pages[i].Blocks
+                .Where(block => !block.IsExcluded)
+                .OrderBy(block => block.ReadingOrder)
+                .FirstOrDefault();
+
+            if (previous is null || next is null || !CanMergeAcrossPage(previous, next))
+            {
+                continue;
+            }
+
+            previous.OcrText = JoinLineTexts(previous.OcrText, next.OcrText);
+            previous.OcrConfidence = Math.Min(previous.OcrConfidence, next.OcrConfidence);
+            previous.RequiresReview |= next.RequiresReview;
+            pages[i].Blocks.Remove(next);
+            mergedCount++;
+        }
+
+        return mergedCount;
+    }
+
+    /// <summary>
     /// 段落頭の飾り文字（ドロップキャップ）を、直後の行の先頭へ連結する。
     /// 雑誌の巻頭言などで段落の1文字目を数行分の大きさで組む体裁があり、OCRはこれを
     /// 独立した行として拾うため、そのままでは「2」と「025年2月…」に分かれてしまう。
     /// 位置関係だけで判定し、飾り文字の外接矩形は取り込まない（大きな高さを持ち込むと
     /// 後続の行高さ比較が壊れて、段落統合そのものが止まるため）。
     /// </summary>
-    private static List<PageBlock> MergeDropCaps(List<PageBlock> blocks)
+    private static List<PageBlock> MergeDropCaps(List<PageBlock> blocks, WritingMode writingMode)
     {
         var lineHeights = blocks
             .Where(b => b.OcrText.Trim().Length > DropCapMaxLength && b.Bounds.Height > 0)
-            .Select(b => b.Bounds.Height)
+            .Select(b => ReadingBounds(b, writingMode).Height)
             .OrderBy(h => h)
             .ToList();
         if (lineHeights.Count == 0)
@@ -87,9 +121,10 @@ public sealed class ParagraphMerger
         foreach (var cap in blocks)
         {
             var capText = cap.OcrText.Trim();
+            var capBounds = ReadingBounds(cap, writingMode);
             if (capText.Length is 0 or > DropCapMaxLength
                 || cap.IsExcluded
-                || cap.Bounds.Height < medianHeight * DropCapHeightRatio)
+                || capBounds.Height < medianHeight * DropCapHeightRatio)
             {
                 continue;
             }
@@ -100,9 +135,9 @@ public sealed class ParagraphMerger
                     && !b.IsExcluded
                     && !merged.Contains(b.Id)
                     && b.OcrText.Trim().Length > DropCapMaxLength
-                    && b.Bounds.X >= cap.Bounds.X
-                    && VerticalOverlap(cap.Bounds, b.Bounds) > 0)
-                .OrderBy(b => b.Bounds.Y)
+                    && ReadingBounds(b, writingMode).X >= capBounds.X
+                    && VerticalOverlap(capBounds, ReadingBounds(b, writingMode)) > 0)
+                .OrderBy(b => ReadingBounds(b, writingMode).Y)
                 .FirstOrDefault();
 
             if (target is null || target.IsManuallyEdited)
@@ -123,11 +158,12 @@ public sealed class ParagraphMerger
     private static double VerticalOverlap(BoundingBox a, BoundingBox b) =>
         Math.Min(a.Y + a.Height, b.Y + b.Height) - Math.Max(a.Y, b.Y);
 
-    private static bool CanMerge(PageBlock paragraph, PageBlock lastLine, PageBlock next)
+    private static bool CanMerge(PageBlock paragraph, PageBlock lastLine, PageBlock next, WritingMode writingMode)
     {
         if (lastLine.Type != next.Type
             || lastLine.TextSource != next.TextSource
-            || next.Type is not (BlockType.Body or BlockType.Aside))
+            || next.Type is not (BlockType.Body or BlockType.Aside
+                or BlockType.ChapterTitle or BlockType.SectionHeading or BlockType.Subheading))
         {
             return false;
         }
@@ -137,41 +173,48 @@ public sealed class ParagraphMerger
             return false;
         }
 
-        var lineHeight = Math.Min(lastLine.Bounds.Height, next.Bounds.Height);
+        var lastBounds = ReadingBounds(lastLine, writingMode);
+        var nextBounds = ReadingBounds(next, writingMode);
+        var lineHeight = Math.Min(lastBounds.Height, nextBounds.Height);
         if (lineHeight <= 0)
         {
             return false;
         }
 
         // 別の段（横に並んでいる）や、フォントサイズが違う行は統合しない。
-        var overlapX = Math.Min(lastLine.Bounds.X + lastLine.Bounds.Width, next.Bounds.X + next.Bounds.Width)
-            - Math.Max(lastLine.Bounds.X, next.Bounds.X);
-        var narrower = Math.Min(lastLine.Bounds.Width, next.Bounds.Width);
+        var overlapX = Math.Min(lastBounds.X + lastBounds.Width, nextBounds.X + nextBounds.Width)
+            - Math.Max(lastBounds.X, nextBounds.X);
+        var narrower = Math.Min(lastBounds.Width, nextBounds.Width);
         if (narrower <= 0 || overlapX / narrower < 0.5)
         {
             return false;
         }
 
-        var heightRatio = Math.Max(lastLine.Bounds.Height, next.Bounds.Height) / lineHeight;
+        var heightRatio = Math.Max(lastBounds.Height, nextBounds.Height) / lineHeight;
         if (heightRatio > MaxHeightRatio)
         {
             return false;
         }
 
         // 縦の隙間が大きい（段落間スペース）か、字下げされている行は新しい段落。
-        var gap = next.Bounds.Y - (lastLine.Bounds.Y + lastLine.Bounds.Height);
+        var gap = nextBounds.Y - (lastBounds.Y + lastBounds.Height);
         if (gap < -0.5 * lineHeight || gap > MaxLineGapRatio * lineHeight)
         {
             return false;
         }
 
-        if (next.Bounds.X - lastLine.Bounds.X > IndentRatio * next.Bounds.Height)
+        if (nextBounds.X - lastBounds.X > IndentRatio * nextBounds.Height)
         {
             return false;
         }
 
         return true;
     }
+
+    private static BoundingBox ReadingBounds(PageBlock block, WritingMode writingMode) =>
+        writingMode == WritingMode.Vertical
+            ? HeuristicLayoutAnalyzer.ToReadingCoordinates(block.Bounds)
+            : block.Bounds;
 
     private static BoundingBox Union(BoundingBox a, BoundingBox b)
     {
@@ -194,9 +237,61 @@ public sealed class ParagraphMerger
             return a;
         }
 
-        // 欧文の行またぎは語間スペースを補い、和文はそのまま連結する。
-        return char.IsAscii(a[^1]) && !char.IsWhiteSpace(a[^1]) && char.IsAscii(b[0]) && !char.IsWhiteSpace(b[0])
-            ? $"{a} {b}"
-            : a + b;
+        // 行末ハイフンの直後へ空白を入れると "applica- tion" のように語が壊れる。
+        // ハイフン自体が語の一部か組版上の分綴かは辞書なしでは確定できないため保持する。
+        if (a[^1] == '-' && char.IsAsciiLetter(b[0]))
+        {
+            return a + b;
+        }
+
+        // 欧文の行またぎは語間スペースを補い、和文はそのまま連結する。右引用符などの
+        // 非ASCII句読点で行が終わる英文もあるため、ASCII判定だけには限定しない。
+        var previous = a[^1];
+        var next = b[0];
+        if (char.IsWhiteSpace(previous)
+            || char.IsWhiteSpace(next)
+            || IsCjk(previous)
+            || IsCjk(next)
+            || previous is '(' or '[' or '{' or '“' or '‘'
+            || next is ',' or '.' or ';' or ':' or '!' or '?' or ')' or ']' or '}' or '%')
+        {
+            return a + b;
+        }
+
+        return $"{a} {b}";
+    }
+
+    private static bool IsCjk(char character) =>
+        character is >= '⺀' and <= '鿿'
+        || character is >= '豈' and <= '﫿'
+        || character is >= '＀' and <= '￯';
+
+    private static bool CanMergeAcrossPage(PageBlock previous, PageBlock next)
+    {
+        if (previous.Type != BlockType.Body
+            || next.Type != BlockType.Body
+            || previous.TextSource != next.TextSource
+            || previous.IsManuallyEdited
+            || next.IsManuallyEdited
+            || previous.Bounds.Y + previous.Bounds.Height < 0.65
+            || next.Bounds.Y > 0.35)
+        {
+            return false;
+        }
+
+        var previousText = previous.OcrText.TrimEnd();
+        var nextText = next.OcrText.TrimStart();
+        if (previousText.Length == 0 || nextText.Length == 0)
+        {
+            return false;
+        }
+
+        if (previousText[^1] is '.' or '!' or '?' or ':' or ';' or '…')
+        {
+            return false;
+        }
+
+        var firstLetter = nextText.FirstOrDefault(char.IsLetter);
+        return firstLetter != default && char.IsLower(firstLetter);
     }
 }

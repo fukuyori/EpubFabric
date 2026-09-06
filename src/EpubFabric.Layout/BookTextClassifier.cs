@@ -29,6 +29,11 @@ internal static class BookTextClassifier
 
     public static BlockType? ClassifyHeading(string text)
     {
+        if (LooksLikeExplicitChapterHeading(text))
+        {
+            return BlockType.ChapterTitle;
+        }
+
         if (TryGetNumberedHeadingDepth(text, out var depth))
         {
             return depth switch
@@ -40,6 +45,41 @@ internal static class BookTextClassifier
         }
 
         return IsCommonBookHeading(text) ? BlockType.ChapterTitle : null;
+    }
+
+    private static bool LooksLikeExplicitChapterHeading(string text)
+    {
+        var words = text.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length < 2 || text.Length > MaxHeadingTextLength)
+        {
+            return false;
+        }
+
+        if (words[0].Equals("chapter", StringComparison.OrdinalIgnoreCase))
+        {
+            var numberToken = words[1];
+            return words.Length <= 10
+                && numberToken.EndsWith(".", StringComparison.Ordinal)
+                && numberToken[..^1].Length > 0
+                && numberToken[..^1].All(char.IsAsciiDigit)
+                && !text.TrimEnd().EndsWith(".", StringComparison.Ordinal);
+        }
+
+        if (!words[0].Equals("part", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (words.Length > 10 || text.TrimEnd().EndsWith(".", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var partNumber = words[1].TrimEnd('.', ':');
+        return partNumber.Length > 0
+            && partNumber.All(character => char.IsAsciiDigit(character)
+                || character is 'I' or 'V' or 'X' or 'L' or 'C' or 'D' or 'M'
+                or 'i' or 'v' or 'x' or 'l' or 'c' or 'd' or 'm');
     }
 
     public static bool LooksLikeFootnote(string text)

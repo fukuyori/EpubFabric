@@ -190,6 +190,52 @@ public class EpubPackageBuilderTests
         }
     }
 
+    [Fact]
+    public void Build_縦書きリフローに縦書きCSS指定と右綴じを設定する()
+    {
+        var block = new PageBlock
+        {
+            Id = "p0001-b0001",
+            PageNumber = 1,
+            Bounds = new BoundingBox(0, 0, 1, 1),
+            Type = BlockType.Body,
+            OcrText = "縦書き本文",
+        };
+        var chapter = new DocumentChapter { Id = "chapter-001", Title = "縦書き章" };
+        chapter.BlockIds.Add(block.Id);
+        var project = new EpubFabricProject
+        {
+            Id = Guid.NewGuid(),
+            Title = "縦書き書籍",
+            SourcePdfPath = "dummy.pdf",
+            Language = "ja",
+            WritingMode = WritingMode.Vertical,
+        };
+        var outputPath = Path.Combine(Path.GetTempPath(), $"epubfabric-test-{Guid.NewGuid():N}.epub");
+
+        try
+        {
+            new EpubPackageBuilder().Build(
+                project,
+                [chapter],
+                new Dictionary<string, PageBlock> { [block.Id] = block },
+                outputPath);
+
+            using var zip = ZipFile.OpenRead(outputPath);
+            using var chapterReader = new StreamReader(zip.GetEntry("EPUB/text/chapter-001.xhtml")!.Open());
+            var xhtml = chapterReader.ReadToEnd();
+            Assert.Contains("class=\"vertical\"", xhtml);
+            Assert.Contains("xml:lang=\"ja\"", xhtml);
+
+            using var packageReader = new StreamReader(zip.GetEntry("EPUB/package.opf")!.Open());
+            Assert.Contains("page-progression-direction=\"rtl\"", packageReader.ReadToEnd());
+        }
+        finally
+        {
+            File.Delete(outputPath);
+        }
+    }
+
     private static string CreatePagePng()
     {
         var path = Path.Combine(Path.GetTempPath(), $"epubfabric-cover-{Guid.NewGuid():N}.png");

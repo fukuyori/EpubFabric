@@ -94,6 +94,40 @@ public class DocumentBuilderTests
         Assert.Equal("校正済みの見出し", Assert.Single(chapters).Title);
     }
 
+    [Fact]
+    public void BuildChapters_DemotesNonStructuralChapterTitleWithoutSplitting()
+    {
+        var page = CreatePage(pageNumber: 1);
+        var chapter = CreateBlock("b1", BlockType.ChapterTitle, "Chapter 1. Philosophy", 0, 1);
+        var falseTitle = CreateBlock("b2", BlockType.ChapterTitle, "Case study: sng", 1, 1);
+        page.Blocks.Add(chapter);
+        page.Blocks.Add(falseTitle);
+        page.Blocks.Add(CreateBlock("b3", BlockType.Body, "本文", 2));
+
+        var chapters = new DocumentBuilder().BuildChapters([page], "テスト書籍");
+
+        Assert.Single(chapters);
+        Assert.Equal(["b2", "b3"], chapters[0].BlockIds);
+        Assert.Equal(BlockType.Subheading, falseTitle.Type);
+    }
+
+    [Fact]
+    public void BuildChapters_DoesNotCreateDuplicateNamedChapter()
+    {
+        var page = CreatePage(pageNumber: 1);
+        page.Blocks.Add(CreateBlock("b1", BlockType.ChapterTitle, "Chapter 1. Philosophy", 0, 1));
+        page.Blocks.Add(CreateBlock("b2", BlockType.Body, "本文A", 1));
+        var duplicate = CreateBlock("b3", BlockType.ChapterTitle, "Chapter 1. Philosophy", 2, 1);
+        page.Blocks.Add(duplicate);
+        page.Blocks.Add(CreateBlock("b4", BlockType.Body, "本文B", 3));
+
+        var chapters = new DocumentBuilder().BuildChapters([page], "テスト書籍");
+
+        Assert.Single(chapters);
+        Assert.Equal(["b2", "b4"], chapters[0].BlockIds);
+        Assert.True(duplicate.IsExcluded);
+    }
+
     private static PageBlock CreateBlock(string id, BlockType type, string text, int readingOrder, int? headingLevel = null) => new()
     {
         Id = id,

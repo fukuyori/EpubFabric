@@ -33,9 +33,32 @@ public sealed class DocumentBuilder
 
         var sections = new List<(string Title, int HeadingLevel, List<string> BlockIds)>();
         var lastSectionIsFallback = false;
+        var seenChapterTitles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var block in orderedBlocks)
         {
+            if (block.Type is BlockType.ChapterTitle)
+            {
+                var candidateTitle = string.IsNullOrWhiteSpace(block.CorrectedText) ? block.OcrText : block.CorrectedText;
+                if (string.IsNullOrWhiteSpace(block.CorrectedText) && !IsStructuralChapterTitle(candidateTitle))
+                {
+                    // 大きな節見出し・コード表のセル・本文断片が高さだけでChapterTitleに
+                    // なっても章分割には使わない。h3へ降格し、本文の位置には残す。
+                    block.Type = BlockType.Subheading;
+                    block.HeadingLevel = 3;
+                }
+                else
+                {
+                    var titleKey = NormalizeTitle(candidateTitle);
+                    if (!seenChapterTitles.Add(titleKey))
+                    {
+                        // 印刷目次や部扉に章名が再掲された場合、同名章を重複生成しない。
+                        block.IsExcluded = true;
+                        continue;
+                    }
+                }
+            }
+
             if (block.Type is BlockType.ChapterTitle)
             {
                 if (sections.Count > 0
@@ -74,6 +97,62 @@ public sealed class DocumentBuilder
             })
             .ToList();
     }
+
+    private static bool IsStructuralChapterTitle(string text)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.Length == 0)
+        {
+            return false;
+        }
+
+        var words = trimmed.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0)
+        {
+            return false;
+        }
+
+        if (words[0].Equals("chapter", StringComparison.OrdinalIgnoreCase))
+        {
+            return words.Length <= 10
+                && words.Length >= 3
+                && IsNumberToken(words[1]);
+        }
+
+        if (words[0].Equals("appendix", StringComparison.OrdinalIgnoreCase)
+            || words[0].Equals("part", StringComparison.OrdinalIgnoreCase))
+        {
+            return words.Length <= 12 && words.Length >= 2;
+        }
+
+        if (words[0].Equals("preface", StringComparison.OrdinalIgnoreCase)
+            || words[0].Equals("foreword", StringComparison.OrdinalIgnoreCase)
+            || words[0].Equals("introduction", StringComparison.OrdinalIgnoreCase)
+            || words[0].Equals("prologue", StringComparison.OrdinalIgnoreCase)
+            || words[0].Equals("epilogue", StringComparison.OrdinalIgnoreCase))
+        {
+            return words.Length <= 8;
+        }
+
+        if (IsNumberToken(words[0]))
+        {
+            return words.Length >= 2 && words.Length <= 12;
+        }
+
+        var chapterMarker = trimmed.IndexOf('章');
+        return chapterMarker is >= 1 and <= 12;
+    }
+
+    private static bool IsNumberToken(string token)
+    {
+        return token.EndsWith(".", StringComparison.Ordinal)
+            && token.Length > 1
+            && token[..^1].All(char.IsAsciiDigit);
+    }
+
+    private static string NormalizeTitle(string title) => string.Join(
+        ' ',
+        title.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).Trim();
 
     private static DocumentChapter BuildSingleChapter(string title, List<PageBlock> blocks)
     {

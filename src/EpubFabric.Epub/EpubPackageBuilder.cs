@@ -86,7 +86,11 @@ public sealed class EpubPackageBuilder
 
         for (var i = 0; i < chapters.Count; i++)
         {
-            var chapterXhtml = _xhtmlGenerator.GenerateChapter(chapters[i], blocksById);
+            var chapterXhtml = _xhtmlGenerator.GenerateChapter(
+                chapters[i],
+                blocksById,
+                project.Language,
+                project.WritingMode);
             WriteXml(zip, $"EPUB/text/{ChapterFileName(i)}", chapterXhtml);
         }
 
@@ -255,6 +259,11 @@ public sealed class EpubPackageBuilder
             new XAttribute("property", "dcterms:modified"),
             DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")));
 
+        var spine = new XElement(Opf + "spine", spineItems);
+        spine.SetAttributeValue(
+            "page-progression-direction",
+            project.WritingMode == WritingMode.Vertical ? "rtl" : "ltr");
+
         return new XDocument(
             new XDeclaration("1.0", "UTF-8", null),
             new XElement(
@@ -264,7 +273,7 @@ public sealed class EpubPackageBuilder
                 new XAttribute(XNamespace.Xml + "lang", project.Language),
                 metadata,
                 new XElement(Opf + "manifest", manifestItems),
-                new XElement(Opf + "spine", spineItems)));
+                spine));
     }
 
     /// <summary>

@@ -42,9 +42,24 @@ public sealed class HeuristicLayoutAnalyzer
     public List<PageBlock> AnalyzePage(
         int pageNumber,
         IReadOnlyList<TextLine> lines,
-        IReadOnlyList<NonTextRegion>? regions = null)
+        IReadOnlyList<NonTextRegion>? regions = null,
+        WritingMode writingMode = WritingMode.Horizontal)
     {
         regions ??= [];
+
+        // 縦書きはページを時計回りに90度回した仮想座標へ移すと、縦の文字列が横書きの
+        // 行になり、右から左への行順も上から下の順になる。分類・段検出・キャプション
+        // 関連付けはこの座標で行い、返却前に元のページ座標へ戻す。
+        if (writingMode == WritingMode.Vertical)
+        {
+            lines = lines
+                .Select(line => line with { Bounds = ToReadingCoordinates(line.Bounds) })
+                .ToList();
+            regions = regions
+                .Select(region => region with { Bounds = ToReadingCoordinates(region.Bounds) })
+                .ToList();
+        }
+
         var boxedRegions = regions.Where(r => r.Kind == NonTextRegionKind.Boxed).ToList();
 
         // 図として検出された領域でも、内部がテキスト行で覆われていてコード的な内容なら
@@ -57,6 +72,12 @@ public sealed class HeuristicLayoutAnalyzer
             if (IsCodeRegion(region, contained))
             {
                 codeRegions.Add((region, contained));
+            }
+            else if (IsTextDominatedRegion(region, contained))
+            {
+                // 罫線表・リンク枠・下線が画像処理で図候補になっても、内部の大部分が
+                // 抽出済みテキストなら画像化せず、行をリフロー本文として残す。
+                continue;
             }
             else
             {
@@ -112,8 +133,28 @@ public sealed class HeuristicLayoutAnalyzer
 
         LinkCaptions(blocks, figureBlocks);
 
+        if (writingMode == WritingMode.Vertical)
+        {
+            foreach (var block in blocks)
+            {
+                block.Bounds = FromReadingCoordinates(block.Bounds);
+            }
+        }
+
         return blocks;
     }
+
+    internal static BoundingBox ToReadingCoordinates(BoundingBox bounds) => new(
+        bounds.Y,
+        1 - bounds.X - bounds.Width,
+        bounds.Height,
+        bounds.Width);
+
+    internal static BoundingBox FromReadingCoordinates(BoundingBox bounds) => new(
+        1 - bounds.Y - bounds.Height,
+        bounds.X,
+        bounds.Height,
+        bounds.Width);
 
     private static PageBlock CreateFigureBlock(int pageNumber, int blockIndex, NonTextRegion region, int readingOrder) => new()
     {
@@ -184,6 +225,25 @@ public sealed class HeuristicLayoutAnalyzer
         }
 
         return nonSpace > 0 && (double)codeSymbols / nonSpace >= minCodeSymbolRatio;
+    }
+
+    private static bool IsTextDominatedRegion(NonTextRegion region, IReadOnlyList<TextLine> containedLines)
+    {
+        const double minTextCoverage = 0.12;
+
+        if (containedLines.Count == 0)
+        {
+            return false;
+        }
+
+        var regionArea = region.Bounds.Width * region.Bounds.Height;
+        if (regionArea <= 0)
+        {
+            return false;
+        }
+
+        var textArea = containedLines.Sum(line => line.Bounds.Width * line.Bounds.Height);
+        return textArea / regionArea >= minTextCoverage;
     }
 
     private static PageBlock CreateTextBlock(
@@ -321,6 +381,7 @@ public sealed class HeuristicLayoutAnalyzer
         if (byHeight == BlockType.Body
             && isShort
             && trimmedLength >= BoldSubheadingMinLength
+            && !line.Text.TrimEnd().EndsWith(".", StringComparison.Ordinal)
             && line.InkDensity is { } density
             && bodyInkDensity is { } bodyDensity
             && bodyDensity > 0

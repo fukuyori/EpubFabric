@@ -334,6 +334,18 @@ public sealed class ConversionPipeline
                 {
                     Report(pageCount, $"全ページの反復を照合し、柱・フッター・ノンブル候補{marginChangeCount}件を再分類しました。");
                 }
+
+                var sourceTocExcludedCount = new SourceTableOfContentsClassifier().Classify(pages);
+                if (sourceTocExcludedCount > 0)
+                {
+                    Report(pageCount, $"原PDF内の印刷目次{sourceTocExcludedCount}ブロックをEPUB本文から除外しました。");
+                }
+
+                var crossPageMergeCount = paragraphMerger.MergeAcrossPages(pages);
+                if (crossPageMergeCount > 0)
+                {
+                    Report(pageCount, $"改ページをまたぐ本文段落{crossPageMergeCount}件を連結しました。");
+                }
             }
 
             if (reviewRequiredCount > 0)
@@ -399,16 +411,22 @@ public sealed class ConversionPipeline
         List<PageBlock> BuildTextBlocks(int pageNumber, string imagePath, IReadOnlyList<TextLine> lines, WritingMode writingMode) =>
             options.PreserveAllTextLines
                 ? textLayerBlockBuilder.Build(pageNumber, lines, writingMode)
-                : AnalyzeLayout(pageNumber, imagePath, lines);
+                : AnalyzeLayout(pageNumber, imagePath, lines, writingMode);
 
-        List<PageBlock> AnalyzeLayout(int pageNumber, string imagePath, IReadOnlyList<TextLine> lines)
+        List<PageBlock> AnalyzeLayout(
+            int pageNumber,
+            string imagePath,
+            IReadOnlyList<TextLine> lines,
+            WritingMode writingMode)
         {
             // 太字見出し検出用に行のインク密度を測る（高さが本文と同じゴシック見出し対策）。
             lines = inkDensityMeasurer.Measure(imagePath, lines);
 
             var textBounds = lines.Select(l => l.Bounds).ToList();
             var regions = regionDetector.DetectRegions(imagePath, textBounds);
-            var blocks = paragraphMerger.Merge(layoutAnalyzer.AnalyzePage(pageNumber, lines, regions));
+            var blocks = paragraphMerger.Merge(
+                layoutAnalyzer.AnalyzePage(pageNumber, lines, regions, writingMode),
+                writingMode);
 
             foreach (var figureBlock in blocks.Where(b => b.Type == BlockType.Figure))
             {
