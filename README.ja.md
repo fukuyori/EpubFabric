@@ -1,0 +1,251 @@
+# EpubFabric
+
+[English](README.md)
+
+PDF（スキャン原稿・テキスト層付きの両方）を、検索・選択・読み上げ可能な EPUB 3 に変換する Windows 向けツールです。
+
+ページ画像で紙面の原型を保証しつつ、OCR・レイアウト解析・ローカル LLM（Ollama）による機械処理と人間の校正を組み合わせて文字情報を付加する、固定レイアウト EPUB 制作環境として設計しています（詳細は [docs/基本設計.md](docs/基本設計.md)）。
+
+各バージョンの変更点は [CHANGELOG.ja.md](CHANGELOG.ja.md) を参照してください。
+
+## 特徴
+
+![EpubFabric の PDF から EPUB への変換画面](images/screenshot.png)
+
+- **固定レイアウト EPUB**（既定）: PDF の 1 ページを EPUB の 1 ページとして収録。ページ画像の上に、座標付きの透明テキスト層を重ねるため、見た目は原本のまま検索・選択・読み上げができる。1 ページ目は表紙（cover-image）として設定される
+- **縦書き対応**: 書字方向をページ単位に自動判定。縦書きの本は右綴じ・右の行から左への読み順・縦書きテキスト層（`writing-mode: vertical-rl`）で出力。縦書き誌に混在する横書きページも正しく処理
+- **リフロー型 EPUB**: レイアウト解析（見出し・段組み・図版・キャプション検出）と段落統合で章構造を持つ EPUB を生成。`--cover-image` を付けると 1 ページ目だけはテキスト化せずページ画像のまま表紙として収録する（表紙は装飾文字が多く OCR の誤読が本文へ混入しやすいため）
+- **OCR**: RapidOcrNet（PP-OCRv6 多言語 ONNX モデル）によるローカル OCR。日本語対応。モデルは初回実行時に自動ダウンロード
+  - 傾き補正（deskew）: OCR 専用の補正画像で認識し、座標は元画像へ逆変換（表示画像は無加工）
+  - 低信頼のゴミ行フィルタ: 表紙・飾りページの誤読が本文へ混入するのを防ぐ
+- **多段組み対応**: ガター（段間の空白）の再帰検出により 2〜4 段組み・不等幅の段の読み順を正しく再現
+- **紙面の高品質化**（`--enhance`）: 紙色のホワイトバランス正規化（黄ばみ・くすみ除去）と裏写り・地色ムラのスムーズステップ白化。幾何変換なしのためテキスト層座標に影響しない。表紙・全面写真ページは自動でスキップ
+- **Ollama 連携**（任意）: ローカル LLM でブロック種別・見出しレベルを意味的に補正し、OCR 誤認識（例: 悄報→情報）を校正。校正は等長置換のみ・URL 保護などの多層ガード付きで、LLM の書き換え事故を適用前に排除
+- **サイズ最適化**: ページ画像を JPEG 品質 85・長辺 2200px（変更可）へ再圧縮して収録。テキスト層の座標には影響しない
+- **評価レポート**: ページ画像+検出ブロックと EPUB 断片を左右対照する HTML レポートで変換精度をチューニング可能
+
+## 必要環境
+
+- Windows 10/11（x64）
+- [.NET 10 SDK](https://dotnet.microsoft.com/)
+- （任意）[Ollama](https://ollama.com/) — `--ollama` を使う場合。既定モデルは `gemma4:12b`
+
+## ビルド
+
+```powershell
+git clone https://github.com/fukuyori/EpubFabric.git
+cd EpubFabric
+
+# ビルド + テスト（Release・配布用ビルドまで作られる）
+.\scripts\build.ps1
+
+# デバッグ構成で、配布用ビルドは省略する
+.\scripts\build.ps1 -Configuration Debug -Runtime ""
+
+# テストの省略・絞り込み、クリーンビルド
+.\scripts\build.ps1 -SkipTests
+.\scripts\build.ps1 -TestFilter ColumnDetectorTests
+.\scripts\build.ps1 -Clean
+```
+
+`dotnet build` / `dotnet test` を直接使っても構いません。
+
+スクリプトは 2 つで、**コンパイルを行うのは `build.ps1` だけ**です。`build-installer.ps1` は `--no-build` でその成果物を配布物に仕立てるだけで、コンパイルもテストもしません。
+
+| スクリプト | 役割 | コンパイル |
+|---|---|---|
+| `build.ps1` | ソリューションのビルドとテスト | する |
+| `build-installer.ps1` | 配布フォルダーへの配置とインストーラーの作成・任意の電子署名 | しない |
+
+引数なしで `build.ps1` → `build-installer.ps1` の順に実行すれば、インストーラーまで出来上がります。
+
+## 配布用実行ファイルの作成
+
+`build-installer.ps1` はコンパイルしないため、先に `build.ps1` で配布用ビルド（自己完結型・.NETランタイム同梱）を作っておきます。両スクリプトの既定は Release / win-x64 で揃えてあるので、引数なしでそのまま繋がります。
+
+```powershell
+# 1) 配布用にビルドする
+.\scripts\build.ps1
+
+# 2) 配布物を作る
+#   CLI       : publish\EpubFabric.Cli\win-x64\
+#   GUI       : publish\EpubFabric.App\win-x64\
+#   インストーラー: publish\installer\EpubFabric-Setup-<version>.exe
+.\scripts\build-installer.ps1
+
+# インストーラーを作らず、配布フォルダーだけ出す場合
+.\scripts\build-installer.ps1 -SkipInstaller
+
+# CLI を単一EXEにまとめる場合
+.\scripts\build-installer.ps1 -SingleFile
+
+# CLI のみ出力する場合（インストーラーは自動で省略される）
+.\scripts\build-installer.ps1 -SkipGui
+```
+
+出力された `EpubFabric.exe`（GUI）と `epubfabric-cli.exe`（CLI）は、.NET のインストールされていない Windows でもそのまま実行できます。
+
+配布用ビルドを作らずに `build-installer.ps1` を実行した場合は、どのコマンドを先に実行すべきかを示して停止します。
+
+### インストーラー（Inno Setup）
+
+`build-installer.ps1` は既定でセットアップ EXE まで作ります。[Inno Setup 6](https://jrsoftware.org/isinfo.php) のインストールが必要です（未インストールの場合はその旨を表示して停止するので、`-SkipInstaller` を付けると配布フォルダーだけ出せます）。
+
+```powershell
+.\scripts\build-installer.ps1
+# → publish\installer\EpubFabric-Setup-0.3.0.exe
+
+# バージョンを明示する場合（既定は Directory.Build.props の <Version>）
+.\scripts\build-installer.ps1 -Version 1.0.0
+
+# 既存の配布出力からインストーラーだけ作り直す場合
+.\scripts\build-installer.ps1 -InstallerOnly
+```
+
+### 電子署名
+
+`-Sign` を付けると、Windows SDK の `signtool.exe` を使って GUI・CLI の実行ファイルを署名し、Inno Setup の署名機能でインストーラーとアンインストーラーにも署名します。コード署名証明書は Windows の証明書ストアに登録しておく必要があります。
+
+```powershell
+# 証明書ストアから最適なコード署名証明書を自動選択する
+.\scripts\build-installer.ps1 -Sign
+
+# SHA-1 サムプリントで証明書を指定する
+.\scripts\build-installer.ps1 -Sign `
+    -CertificateThumbprint 0123456789ABCDEF0123456789ABCDEF01234567
+
+# RFC 3161 タイムスタンプを付ける
+.\scripts\build-installer.ps1 -Sign `
+    -TimestampUrl https://timestamp.example.com
+```
+
+`-TimestampUrl` を省略した場合はタイムスタンプを付けません。`-CertificateThumbprint` と `-TimestampUrl` は `-Sign` と組み合わせて指定してください。PFX ファイルとパスワードをコマンドラインで受け取る機能はありません。
+
+インストーラーは日本語/英語対応で、管理者（Program Files）・ユーザー単位（%LocalAppData%\Programs）のどちらでもインストールできます。インストール後はスタートメニューの「EpubFabric」から起動できます（デスクトップアイコンの作成も選択可）。
+
+配置は次のとおりで、**本体である GUI をアプリ直下**に、CLI を補助ツールとして `cli\` 配下に置きます。
+
+```
+<インストール先>\
+  EpubFabric.exe          GUI（本体）
+  cli\epubfabric-cli.exe  CLI（補助）
+```
+
+「PATH 環境変数に追加する」タスクを選ぶと、コマンドプロンプトやファイル名を指定して実行から `epubfabric` と打つだけで GUI が起動します（アンインストール時に除去されます）。CLI を使う場合はスタートメニューの「EpubFabric CLI（コマンドプロンプト）」から開きます。
+
+## 使い方（CLI）
+
+```powershell
+# PDF情報の確認
+dotnet run --project src\EpubFabric.Cli -- info input.pdf
+
+# 固定レイアウトEPUB生成（既定）
+dotnet run --project src\EpubFabric.Cli -- convert input.pdf --output book.epub
+
+# 複数のPDFを連続変換（--output は出力フォルダー。未指定なら各PDFと同じ場所）
+dotnet run --project src\EpubFabric.Cli -- convert a.pdf b.pdf c.pdf --output out-dir
+
+# リフロー型EPUB生成
+dotnet run --project src\EpubFabric.Cli -- convert input.pdf --layout reflow
+
+# リフロー型で、1ページ目はテキスト化せず表紙画像として収録
+dotnet run --project src\EpubFabric.Cli -- convert input.pdf --layout reflow --cover-image
+
+# スキャン紙面の高品質化（紙色正規化・裏写り抑制）を有効化
+dotnet run --project src\EpubFabric.Cli -- convert input.pdf --enhance
+
+# Ollamaによる見出し分類 + OCR校正を有効化
+dotnet run --project src\EpubFabric.Cli -- convert input.pdf --ollama
+
+# ページ画像の圧縮設定（既定: 品質85・長辺2200px、0で縮小なし）
+dotnet run --project src\EpubFabric.Cli -- convert input.pdf --image-quality 90 --max-image-size 2600
+
+# 変換精度の評価レポート（EPUBは生成しない）
+dotnet run --project src\EpubFabric.Cli -- evaluate input.pdf --report report-dir
+# → report-dir\index.html をブラウザで開く
+
+# 解析結果をプロジェクトとして保存 → 手動校正 → EPUB書き出し
+dotnet run --project src\EpubFabric.Cli -- analyze input.pdf --project book.efproj
+dotnet run --project src\EpubFabric.Cli -- export book.efproj --format epub
+```
+
+主なオプション:
+
+| オプション | 既定値 | 説明 |
+|---|---|---|
+| `--layout <fixed\|reflow>` | `fixed` | 出力レイアウト |
+| `--dpi <dpi>` | `300` | ページラスタライズ解像度 |
+| `--enhance` | 無効 | スキャン紙面の高品質化（紙色正規化・裏写り抑制） |
+| `--cover-image` | 無効 | リフロー型で1ページ目をテキスト化せず表紙画像として収録（固定レイアウトでは元から全ページが画像のため無視） |
+| `--vertical` / `--horizontal` | 自動判定 | 書字方向の強制指定。既定では行の形状からページ単位に自動判定し、縦書きの本は右綴じ（右→左のページ送り）・右→左の読み順・縦書きテキスト層で出力される |
+| `--image-quality <1-100>` | `85` | ページ画像のJPEG品質（固定レイアウト） |
+| `--max-image-size <px>` | `2200` | ページ画像の長辺上限。`0`で縮小なし |
+| `--ollama` | 無効 | Ollamaによる意味分類とOCR校正 |
+| `--ollama-model <model>` | `gemma4:12b` | 使用モデル |
+| `--ollama-endpoint <url>` | `http://localhost:11434` | Ollamaサーバー |
+
+## 使い方（GUI）
+
+WinUI 3 のデスクトップアプリ（`EpubFabric.App`）から、PDF の一覧を作って順に変換できます。
+
+- 「追加...」で複数選択、またはウィンドウへドラッグ＆ドロップして一覧に積みます。**1 件ずつ落として追加していけます**
+- 一覧では各ファイルの左端に状態（待機中／変換中／完了／失敗／中止など）が表示されます。「選択項目を削除」「すべて削除」で編集できます
+- 出力先は「出力フォルダー」で指定します。未指定なら各 PDF と同じ場所に `入力名.epub` を作ります
+- 1 件が失敗しても残りの変換は続行し、最後に成功・失敗の件数を表示します
+- 変換中にウィンドウを閉じようとすると確認画面が開きます。「終了する」は変換を中止して終了し、「変換を続ける」は画面に戻ります
+
+インストーラーでインストールした場合は、スタートメニューの「EpubFabric」（またはデスクトップアイコン）から起動します。
+
+開発時の起動:
+
+```powershell
+# 開発時はそのまま起動できる
+dotnet run --project src\EpubFabric.App
+
+# ビルド済み exe を直接起動する場合（x64 の場合）
+dotnet build src\EpubFabric.App
+.\src\EpubFabric.App\bin\Debug\net10.0-windows10.0.26100.0\win-x64\EpubFabric.exe
+```
+
+アンパッケージ構成（exe 直接実行）で、WinAppSDK ランタイムも同梱されるため、MSIX の登録や別途ランタイムのインストールは不要です。
+
+## プロジェクト構成
+
+```
+src/
+  EpubFabric.Cli          コマンドライン（Pipelineの進捗をコンソールへ表示）
+  EpubFabric.App          Windows GUI（WinUI 3、実行ファイルは EpubFabric.exe）: 複数PDFの一覧→オプション→進捗表示付き連続変換
+  EpubFabric.Pipeline     変換パイプラインのオーケストレーション（CLI/GUI共用）
+  EpubFabric.Core         データモデル・設定
+  EpubFabric.Pdf          PDF読み込み・ラスタライズ・テキスト層抽出（Docnet/PDFium）
+  EpubFabric.Ocr          OCR（RapidOcrNet / PP-OCRv6）・ゴミ行フィルタ・モデル管理
+  EpubFabric.Imaging      画像処理（OpenCvSharp）: 図版検出・OCR前処理（deskew）
+  EpubFabric.Layout       レイアウト解析: 見出し・段組み（ColumnDetector）・段落統合
+  EpubFabric.Ollama       Ollama連携: ブロック分類・OCR文字列校正
+  EpubFabric.Document     文書構造化（章分割）
+  EpubFabric.Epub         EPUB 3 パッケージ生成（固定レイアウト/リフロー）
+  EpubFabric.Evaluation   変換精度の評価レポート生成
+  EpubFabric.Persistence  プロジェクト（.efproj）の保存・読み込み
+tests/
+  EpubFabric.Tests        単体テスト（xUnit）
+docs/
+  基本設計.md              全体設計
+  固定レイアウト開発方針.md  固定レイアウトの方針
+```
+
+## 変換パイプラインの概要
+
+1. **ラスタライズ**: PDFium で各ページを PNG 化（既定 300dpi、白地合成）
+2. **テキスト取得**: テキスト層があり品質基準を満たすページは PDF から文字座標を抽出。それ以外は OCR（前処理で傾き補正 → PP-OCRv6 → 信頼度・文字種によるゴミ行除去）
+3. **レイアウト解析**（リフロー時）: 図版・囲み記事検出、見出し推定、段組み検出、段落統合
+4. **Ollama 補正**（任意）: ブロック種別・見出しレベルの意味的補正、OCR 誤認識の校正
+5. **EPUB 生成**: 固定レイアウトはページ画像+透明テキスト層、リフローは章構造の XHTML。ページ画像は再圧縮して収録
+
+## ライセンス・謝辞
+
+本プロジェクトは [GNU AGPLv3](LICENSE) で公開しています。
+
+- OCR モデル: [RapidOCR](https://github.com/RapidAI/RapidOCR)（PP-OCRv6）/ [RapidOcrNet](https://github.com/BobLd/RapidOcrNet)
+- PDF レンダリング: [Docnet](https://github.com/GowenGit/docnet)（PDFium）
+- 画像処理: [OpenCvSharp](https://github.com/shimat/opencvsharp) / [SkiaSharp](https://github.com/mono/SkiaSharp)
+- 紙面高品質化（`--enhance`）の手法は、登 大遊氏の [DN_SuperBook_PDF_Converter](https://github.com/dnobori/DN_SuperBook_PDF_Converter)（AGPLv3）の紙色統計補正のアイデアを参考に、OpenCV で独自実装したものです

@@ -1,135 +1,137 @@
-# 変更履歴
+# Changelog
 
-このファイルの書式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、
-バージョン番号は [セマンティック バージョニング](https://semver.org/lang/ja/) に従います。
+[日本語](CHANGELOG.ja.md)
 
-## [未リリース]
+The format of this file is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
 
 ## [0.3.0] - 2026-09-06
 
-### 追加
+### Added
 
-- 全ページを横断して反復する柱・フッター・ノンブルを判定し、反復しない余白テキストを本文へ戻すようにした
-- ページ下部の小さい文字と脚注記号を使った脚注検出を追加した
-- 英語の番号付き見出しと定型的な書籍見出しを、文字内容から補助判定するようにした
-- 配布スクリプトを `publish.ps1` から `build-installer.ps1` へ改名し、`-Sign` でCLI・GUI・インストーラー・アンインストーラーへ電子署名できるようにした
+- Detect repeating running headers, footers, and page numbers across all pages while restoring non-repeating margin text to the body
+- Added footnote detection based on small text near the bottom of a page and footnote markers
+- Added content-based heuristics for numbered English headings and common book-heading patterns
+- Renamed the distribution script from `publish.ps1` to `build-installer.ps1`, and added `-Sign` support for digitally signing the CLI, GUI, installer, and uninstaller
 
 ## [0.2.4] - 2026-07-29
 
-### 修正
+### Fixed
 
-- GUI の PDF 一覧で、各ファイルの処理状態を右端ではなく左端に表示するようにした
-- GUI で PDF の変換中に終了しようとした場合、変換を中止して終了するか確認するようにした
+- Moved each file's processing status from the right edge to the left edge of the PDF list in the GUI
+- Added confirmation when closing the GUI during PDF conversion, allowing the user to cancel the conversion and exit
 
 ## [0.2.3] - 2026-07-29
 
-### 追加
+### Added
 
-- 複数の PDF を連続して変換できるようにした
-  - **GUI** は変換する PDF の**一覧**を持つ画面に作り直した。一覧には各ファイルの名前・フォルダーと、待機中／変換中／完了／失敗／中止の状態が出る。ドラッグ＆ドロップは一覧への追加として扱うため 1 件ずつ落として積み上げられ、「追加...」「選択項目を削除」「すべて削除」で編集できる。出力先は「出力フォルダー」に一本化した（未指定なら各 PDF と同じ場所に `入力名.epub`）
-  - **CLI** は `convert a.pdf b.pdf c.pdf` の形で受け付け、`--output` を出力フォルダーとして扱う
-  - いずれも 1 件が失敗しても残りの変換は続行し、最後に成功・失敗の件数を表示する
-- GUI の画面タイトル横にバージョンを表示するようにした（例: `v0.2.3`）
+- Added sequential conversion of multiple PDFs
+  - The **GUI** was redesigned around a list of PDFs to convert. Each entry shows the file name, folder, and status: waiting, converting, completed, failed, or canceled. Because drag and drop adds files to the list, files can be dropped one at a time to build the list incrementally. The list can be edited with “Add...,” “Remove selected,” and “Remove all.” Output is now configured solely through “Output folder”; when omitted, `input-name.epub` is written next to each PDF
+  - The **CLI** now accepts commands in the form `convert a.pdf b.pdf c.pdf` and treats `--output` as an output directory
+  - In both interfaces, the remaining conversions continue if one file fails, and the final result reports the numbers of successful and failed conversions
+- Added the version next to the GUI screen title, for example `v0.2.3`
 
-### 修正
+### Fixed
 
-- GUI の処理状況（ログ）が自動で追従せず、最初の部分しか見えなかった問題を修正。ListView は表示範囲外の行を実体化しないため、行を追加した直後の末尾へのスクロール指示が空振りしていた。内側のスクロール位置を直接動かし、かつレイアウト後に実行するようにした。あわせて、連続変換でログが際限なく伸びないよう上限（5000行）を設けた
-- GUI のオプションが横一列に並んでいたため、ウィンドウ幅に収まらず右側（Ollama モデルなど）が見えなくなっていた問題を修正。設定値の入力とチェックボックスを2行に分け、さらにウィンドウを狭めた場合でも操作できるよう横スクロールを許すようにした
+- Fixed the GUI processing log not following new entries automatically and showing only the beginning. Because ListView does not materialize rows outside the visible range, requests to scroll to the end immediately after adding a row had no effect. The inner scroll position is now changed directly after layout completes. A 5,000-line limit was also added so the log cannot grow indefinitely during sequential conversion
+- Fixed the GUI options being arranged in one horizontal row, which caused options on the right, such as the Ollama model, to disappear beyond the window width. Value inputs and checkboxes are now split across two rows, and horizontal scrolling remains available when the window is narrowed further
 
 ## [0.2.2] - 2026-07-29
 
-### 変更
+### Changed
 
-- 実行ファイル名を、本体が GUI であることに合わせて整理した。GUI は `EpubFabric.App.exe` → **`EpubFabric.exe`**（ウィンドウタイトルも「EpubFabric」に）、CLI は `epubfabric.exe` → **`epubfabric-cli.exe`**
-- インストーラーの配置を入れ替え、GUI をアプリ直下（PATH に追加される場所）、CLI を補助ツールとして `cli\` 配下に置くようにした。**`epubfabric` と打つと GUI が起動する**（従来は CLI が起動していた）
-- `build.ps1` の既定を Release / win-x64 に変更。`publish.ps1` の既定と揃えたことで、両スクリプトを引数なしで順に実行すればインストーラーまで出来上がるようになった（従来は build が Debug のため publish が続かなかった）。デバッグビルドは `-Configuration Debug`、配布用ビルドの省略は `-Runtime ""`
-- `publish.ps1` が既定でインストーラーまで作成するようになった。`-Installer` スイッチは廃止し、代わりに `-SkipInstaller` で配布フォルダーのみの出力を選べる。`-SkipGui` 指定時はインストーラーが GUI を同梱できないため自動的に省略する
+- Renamed the executables to reflect the GUI's role as the main application. The GUI changed from `EpubFabric.App.exe` to **`EpubFabric.exe`**, and the window title changed to “EpubFabric.” The CLI changed from `epubfabric.exe` to **`epubfabric-cli.exe`**
+- Reorganized the installer layout: the GUI is placed at the application root, which is added to PATH, and the CLI is placed under `cli\` as a supporting tool. **Entering `epubfabric` now launches the GUI**; previously it launched the CLI
+- Changed the defaults of `build.ps1` to Release / win-x64. These now match the defaults of `publish.ps1`, so running both scripts in sequence without arguments produces an installer. Previously, the build defaulted to Debug and could not be followed by publish. Use `-Configuration Debug` for a debug build and `-Runtime ""` to skip the distribution build
+- Changed `publish.ps1` to create an installer by default. The `-Installer` switch was removed; use `-SkipInstaller` to create only the distribution folders. When `-SkipGui` is specified, the installer is skipped automatically because it cannot include the GUI
 
-### 修正
+### Fixed
 
-- リフロー型で、紙面の端に縦組みのサイドバー（記事タイトル等）があるページの本文が、段落の途中で分断されていた問題を修正。サイドバーが独立した段として認識されず本文の行間に割り込んでいた。段間の探索範囲を紙面の端寄りまで広げ、各段の最小割合を緩和し、**段またぎの判定を「幅が広いか」から「実際に段間を跨ぐか」へ変更**した（従来は1段組みページの本文行が幅広と判定されて1行ずつに解体されていた）。科学202601の先頭40ページで1ブロックあたりの文字数が 60.5 → 61.5 に改善し、悪化したページはなし
-- 段落頭のドロップキャップ（1文字目を数行分の大きさで組む体裁）が独立したブロックになり、本文が「2」と「025年2月…」に割れていた問題を修正。直後の行の先頭へ連結するようにした
-- 写真が主体で本文行のないページに、傾いていないのに大きな傾き補正がかかっていた問題を修正。被写体の輪郭が投影プロファイルの山を作るためで、実データでは裏表紙に -10.5°、口絵に 6.2° が出ていた。無回転に対する投影スコアの改善率で「行が揃ったことによる山か」を確かめ、満たさない場合は補正しないようにした（実測で誤推定は改善率1.05以下、実際の傾きは1.8以上と分離）。あわせて、精探索が探索上限を越えて ±10.5° のような値を返す不具合も修正
-- `--enhance` の補正値を、ページごとの推定から**書籍全体の紙色**に変更した。全ページの紙色を先に測り、中央絶対偏差（MAD）で外れ値ページ（口絵・全面写真など紙色を正しく測れないページ）を除いてから中央値を採る。ページごとの推定では写真の面積などで紙色が揺れ、隣り合うページの明るさが揃わなかった（地理202601の実測で紙輝度の推定が246〜255にばらついていた）。紙面と判定できるページが3枚未満の場合は従来どおりページごとの推定を使う。なお加工するかどうかの判定は引き続きページ単位で行うため、写真ページは従来どおり無加工で残る
-- `--enhance` の白化が明るさだけで判定していたため、淡い色の図版や色地が白へ流れて消えることがあった問題を修正。彩度が低く、かつ紙色との色味の差が小さい画素だけを対象にした（明るさの差ではなくチャンネル間の差で測るため、単に紙より暗いだけの裏写り・地色ムラは従来どおり白化される）
-- GUI の起動時のウィンドウが画面いっぱいに近く広すぎた問題を修正。内容に見合う大きさ（1180×820、画面の拡大率に追随）で中央に開くようにした
-- GUI の変換中に「表紙をページ画像で収録（リフロー時）」だけが操作可能なまま残っていた問題を修正（他のオプションと同様に無効化するようにした）
-- GUI の配布ビルドで Ollama 分類・校正が「Reflection-based serialization has been disabled for this application」で失敗する問題を修正。トリミングを有効にすると SDK が `System.Text.Json.JsonSerializer.IsReflectionEnabledByDefault=false` を runtimeconfig へ焼き込み、リフレクションベースの JSON を使う `OllamaClient` が実行時に例外になっていた。この設定はビルド時に決まるため publish 側の指定では打ち消せず、プロジェクト側でトリミングを無効にした
+- Fixed body text in reflowable EPUBs being split in the middle of paragraphs on pages with a vertical sidebar, such as an article title, at the page edge. The sidebar was not recognized as an independent column and was inserted between body lines. The gutter search area now extends closer to the page edge, the minimum proportion for each column was relaxed, and **cross-column detection was changed from asking whether an item is wide to checking whether it actually crosses a gutter**. Previously, body lines on single-column pages were judged to be wide and split into individual lines. In the first 40 pages of Kagaku 202601, average characters per block improved from 60.5 to 61.5 with no regressions
+- Fixed paragraph drop caps being separated into independent blocks, which split text such as “2” and “025年2月…”. A drop cap is now joined to the start of the following line
+- Fixed large deskew corrections being applied to photograph-dominant pages with no body-text lines, even though they were not tilted. Subject outlines produced peaks in the projection profile; actual data yielded -10.5° for a back cover and 6.2° for a frontispiece. The implementation now checks whether the projection score improved enough over the unrotated image to indicate aligned lines, and skips correction otherwise. Measurements separated false estimates, with improvement ratios of 1.05 or less, from actual skew, with ratios of 1.8 or more. Also fixed the fine search returning values beyond the search limit, such as ±10.5°
+- Changed `--enhance` correction values from per-page estimates to the **paper color of the entire book**. Paper color is measured for every page, pages with unusable measurements such as frontispieces and full-page photographs are removed as outliers using median absolute deviation (MAD), and the median is used. Per-page estimates varied with factors such as photograph area, producing inconsistent brightness across adjacent pages; measurements for Chiri 202601 ranged from 246 to 255 in estimated paper luminance. When fewer than three pages can be identified as paper pages, the previous per-page estimation remains in use. The decision whether to modify a page is still made per page, so photograph pages remain untouched as before
+- Fixed pale illustrations and colored backgrounds sometimes fading to white because `--enhance` whitening considered only brightness. Whitening now targets only pixels with low saturation and a hue close to the paper color. Because the comparison uses differences between channels rather than simply how much darker a pixel is than the paper, bleed-through and uneven backgrounds continue to be whitened as before
+- Reduced the GUI's overly large initial window size. It now opens centered at 1180×820, scaled for the display's DPI
+- Fixed the “Use first page as cover image (reflow)” option remaining enabled during GUI conversion; it is now disabled like the other options
+- Fixed Ollama classification and correction failing in GUI distribution builds with “Reflection-based serialization has been disabled for this application.” Enabling trimming made the SDK write `System.Text.Json.JsonSerializer.IsReflectionEnabledByDefault=false` into runtimeconfig, causing `OllamaClient`, which uses reflection-based JSON serialization, to throw at runtime. Because this setting is determined at build time and cannot be overridden during publish, trimming was disabled in the project
 
 ## [0.2.1] - 2026-07-29
 
-### 変更
+### Changed
 
-- ビルドと配布のスクリプトを整理し、**コンパイルを行うのは `scripts\build.ps1` だけ**にした
-  - `scripts\build.ps1` を新設（ソリューションのビルドとテスト。`-Runtime` 指定で自己完結型の配布用ビルド、`-SkipTests` / `-TestFilter` / `-Clean` に対応）
-  - `scripts\publish.ps1` は `dotnet publish --no-build` になり、コンパイルもテストも行わず、ビルド済みバイナリを配布物に仕立てるだけになった。配布用ビルドが無い場合は、先に実行すべきコマンドを示して停止する
-  - `scripts\build-installer.ps1` を `publish.ps1` に統合して削除
+- Reorganized the build and distribution scripts so that **only `scripts\build.ps1` compiles the application**
+  - Added `scripts\build.ps1`, which builds and tests the solution; `-Runtime` creates a self-contained distribution build, and `-SkipTests`, `-TestFilter`, and `-Clean` are supported
+  - Changed `scripts\publish.ps1` to use `dotnet publish --no-build`. It no longer compiles or tests and only turns built binaries into a distribution. If no distribution build exists, it stops and displays the command that must be run first
+  - Integrated `scripts\build-installer.ps1` into `publish.ps1` and removed it
 
 ## [0.2.0] - 2026-07-29
 
-### 追加
+### Added
 
-- アプリアイコンを作成（紙面としおりリボンの意匠）。WinUI テンプレートの既定プレースホルダーを置き換え、ICO は 16〜256px の 9 サイズを格納。CLI・GUI の実行ファイルとインストーラーにも埋め込む
-- リフロー型 EPUB で 1 ページ目をテキスト化せずページ画像のまま表紙として収録する `--cover-image`（GUI にもチェックボックス）。表紙は装飾文字が多く OCR の誤読が本文へ混入するため、紙面をそのまま見せる選択肢を用意した
-- インストーラーが GUI（`EpubFabric.App`）も同梱するようになり、スタートメニューとデスクトップのショートカットから起動できるようになった
+- Created an application icon featuring a page and bookmark ribbon. It replaces the default WinUI template placeholder, includes nine ICO sizes from 16 to 256 pixels, and is embedded in the CLI and GUI executables and the installer
+- Added `--cover-image` for reflowable EPUBs, with a corresponding GUI checkbox. It stores the first page as an image without converting it to text. Because covers often contain decorative text that OCR misrecognizes, this option preserves the original page without introducing those errors into the body
+- Added the GUI (`EpubFabric.App`) to the installer and provided Start menu and desktop shortcuts
 
-### 修正
+### Fixed
 
-- 固定レイアウトの読み順が 2 段組みページで左右の段を 1 行ずつ交互に出力していた問題を修正。段に分割したあと、段内の行が「段をまたぐ幅広項目」と誤判定されて 1 行ずつのグループへ解体されていた。科学 202601 で読み順が崩れるページが 47 → 3（全 102 ページ中）、地理 202601 で 9 → 2（先頭 40 ページ中）に改善
-- リフロー型 EPUB で図版が画面幅を超えてはみ出していた問題を修正。スタイルシートに画像の寸法上限（`max-width: 100%`）が無く、抽出図版が元の解像度のまま描画されていた
-- 固定レイアウトで再圧縮が不要な画像のとき、`--enhance` の高品質化画像ではなく元画像が収録されていた問題を修正
+- Fixed the reading order in fixed-layout EPUBs alternating one line at a time between the left and right columns on two-column pages. After column splitting, lines within a column were incorrectly classified as wide items crossing columns and separated into one-line groups. The number of pages with broken reading order improved from 47 to 3 out of 102 pages in Kagaku 202601, and from 9 to 2 in the first 40 pages of Chiri 202601
+- Fixed figures in reflowable EPUBs extending beyond the screen width. The stylesheet lacked an image size limit (`max-width: 100%`), so extracted figures were displayed at their original resolution
+- Fixed fixed-layout EPUBs using the original image instead of the enhanced `--enhance` image when recompression was unnecessary
 
 ## [0.1.4] - 2026-07-18
 
-### 追加
+### Added
 
-- 出版物の言語（`dc:language`）を認識テキストの文字種比率から自動判定（ja/en/zh/ko）。`--language` で強制指定も可能
-- PDF のテキスト層を無視して全ページを OCR し直す `--force-ocr`。古いスキャン OCR 由来の低品質なテキスト層を持つ PDF 向け
-- 先頭 n ページで変換を打ち切る `--max-pages`（試し変換・設定調整用）
+- Added automatic detection of publication language (`dc:language`) from recognized-text character ratios for Japanese, English, Chinese, and Korean (`ja`, `en`, `zh`, and `ko`). The language can be forced with `--language`
+- Added `--force-ocr` to ignore the PDF text layer and rerun OCR on every page, intended for PDFs with low-quality text layers from older scan OCR
+- Added `--max-pages` to stop conversion after the first n pages for trial conversions and configuration tuning
 
-### 修正
+### Fixed
 
-- 目次と本文見出しの整合。目次を本文見出しと同一データから生成し、章の下に節見出しを入れ子にした。章タイトルの資格条件を設けて、飾り文字や断片が章として並ぶのを抑制
+- Made the table of contents consistent with body headings. The table of contents is now generated from the same data as body headings, section headings are nested under chapters, and chapter-title eligibility rules suppress decorative text and fragments from appearing as chapters
 
 ## [0.1.3] - 2026-07-18
 
-### 修正
+### Fixed
 
-- 網点由来の長い数字列が本文へ混入する問題に対処（低信頼かつ区切りのない 16 桁以上の数字列を破棄。ISBN や電話番号は区切りで免除）
-- リフロー型の図版を JPEG で抽出するようにして、EPUB のサイズを削減
+- Prevented long sequences of digits caused by halftone patterns from entering body text. Low-confidence sequences of 16 or more digits without separators are discarded; separators exempt values such as ISBNs and telephone numbers
+- Reduced EPUB size by extracting figures in reflowable EPUBs as JPEG images
 
 ## [0.1.2] - 2026-07-18
 
-### 追加
+### Added
 
-- 太字見出しの検出。行の黒画素率（インク密度）を測り、本文より濃い行を見出しとして扱う。文字の高さが本文と同じゴシック見出しを拾えるようになった
+- Added bold-heading detection. It measures each line's black-pixel ratio (ink density) and treats lines darker than body text as headings, allowing same-size sans-serif headings to be detected
 
 ## [0.1.1] - 2026-07-18
 
-### 修正
+### Fixed
 
-- GUI の校正画面（3 ペイン）の操作性を改善
+- Improved usability of the GUI's three-pane proofreading screen
 
 ## [0.1.0] - 2026-07-18
 
-最初のリリース。PDF（スキャン原稿・テキスト層付きの両方）を EPUB 3 に変換する一連の機能。
+Initial release, providing a complete workflow for converting PDFs—both scanned documents and PDFs with text layers—to EPUB 3.
 
-### 追加
+### Added
 
-- 固定レイアウト EPUB の生成（ページ画像＋座標付きの透明テキスト層）。1 ページ目は表紙として設定
-- リフロー型 EPUB の生成（レイアウト解析と段落統合による章構造）
-- OCR（RapidOcrNet / PP-OCRv6 多言語 ONNX モデル、日本語対応）。傾き補正と低信頼のゴミ行フィルタを含む
-- 縦書き対応。書字方向をページ単位に自動判定し、右綴じ・右から左への読み順・縦書きテキスト層で出力
-- 多段組みの読み順検出（ガターの再帰検出により 2〜4 段・不等幅に対応）
-- 紙面の高品質化 `--enhance`（紙色のホワイトバランス正規化、裏写り・地色ムラの抑制）
-- Ollama 連携 `--ollama`（ブロック種別・見出しレベルの意味的補正と、OCR 誤認識の校正）。等長置換のみ許可などの多層ガード付き
-- ページ画像の再圧縮によるサイズ最適化（`--image-quality` / `--max-image-size`）
-- 変換精度の評価レポート `evaluate`（ページ画像と EPUB 断片の左右対照 HTML とメトリクス）
-- プロジェクト形式 `.efproj` による解析・手動校正・書き出しのワークフロー（`analyze` / `export`）
-- Windows GUI（WinUI 3）: 変換画面と 3 ペインの校正画面
-- 配布用スクリプトと Inno Setup インストーラー
+- Fixed-layout EPUB generation with page images and positioned transparent text layers; the first page is designated as the cover
+- Reflowable EPUB generation with chapter structure created through layout analysis and paragraph merging
+- OCR using RapidOcrNet and the multilingual PP-OCRv6 ONNX model, with Japanese support, deskewing, and low-confidence noise-line filtering
+- Vertical writing support with per-page writing-direction detection, right binding, right-to-left reading order, and vertical text layers
+- Multi-column reading-order detection supporting two to four columns and uneven widths through recursive gutter detection
+- Page enhancement with `--enhance`, including paper-color white-balance normalization and suppression of bleed-through and uneven backgrounds
+- Ollama integration with `--ollama` for semantic correction of block types and heading levels and correction of OCR errors, protected by multiple safeguards such as equal-length replacement only
+- Size optimization through page-image recompression with `--image-quality` and `--max-image-size`
+- Conversion-accuracy reports with `evaluate`, providing side-by-side HTML views of page images and EPUB fragments plus metrics
+- Analysis, manual proofreading, and export workflow using `.efproj` project files with `analyze` and `export`
+- Windows GUI (WinUI 3) with conversion and three-pane proofreading screens
+- Distribution scripts and an Inno Setup installer
 
-[未リリース]: https://github.com/fukuyori/EpubFabric/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/fukuyori/EpubFabric/compare/v0.3.0...HEAD
 [0.3.0]: https://github.com/fukuyori/EpubFabric/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/fukuyori/EpubFabric/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/fukuyori/EpubFabric/compare/v0.2.2...v0.2.3
