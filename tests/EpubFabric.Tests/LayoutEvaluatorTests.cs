@@ -17,6 +17,8 @@ public class LayoutEvaluatorTests
             Width = 595,
             Height = 842,
             WritingMode = WritingMode.Horizontal,
+            LayoutPattern = PageLayoutPattern.HorizontalTwoColumn,
+            LayoutPatternConfidence = 0.91,
             Status = PageProcessingStatus.OcrCompleted,
         };
 
@@ -73,6 +75,8 @@ public class LayoutEvaluatorTests
         Assert.Equal(1, summary.LowConfidenceIncludedCount);
 
         var pageEval = summary.Pages[0];
+        Assert.Equal(PageLayoutPattern.HorizontalTwoColumn, pageEval.LayoutPattern);
+        Assert.Equal(0.91, pageEval.LayoutPatternConfidence);
         Assert.Equal(2, pageEval.BlockCountsByType[nameof(BlockType.Figure)]);
         Assert.Equal(1, pageEval.BlockCountsByType[nameof(BlockType.Body)]);
     }

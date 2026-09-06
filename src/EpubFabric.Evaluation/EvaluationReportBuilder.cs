@@ -25,6 +25,7 @@ public sealed class EvaluationReportBuilder
         WriteIndented = true,
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
+        Converters = { new JsonStringEnumConverter() },
     };
 
     public void Write(string reportDirectory, string title, EvaluationSummary summary, IReadOnlyList<PageReportEntry> pages)
@@ -111,7 +112,7 @@ public sealed class EvaluationReportBuilder
             html.Append($"""
                 <section class="page" id="page-{e.PageNumber}">
                 <h2>ページ {e.PageNumber}
-                <span class="m">ブロック {e.BlockCount} / 網羅 {e.TextCoverage:P0} / 図 {e.FigureWithImageCount}/{e.FigureCount} / 見出し {e.HeadingCount}{(e.TextCharsDropped > 0 ? $" / <span class=\"warn\">欠落 {e.TextCharsDropped}字</span>" : "")}</span>
+                <span class="m">{LayoutPatternLabel(e.LayoutPattern)}（信頼度 {e.LayoutPatternConfidence:0.00}） / ブロック {e.BlockCount} / 網羅 {e.TextCoverage:P0} / 図 {e.FigureWithImageCount}/{e.FigureCount} / 見出し {e.HeadingCount}{(e.TextCharsDropped > 0 ? $" / <span class=\"warn\">欠落 {e.TextCharsDropped}字</span>" : "")}</span>
                 </h2>
                 <div class="row">
                 <div><img src="{page.OverlayImageRelativePath}" loading="lazy" alt="ページ {e.PageNumber}"></div>
@@ -124,4 +125,14 @@ public sealed class EvaluationReportBuilder
         html.Append("</body></html>");
         return html.ToString();
     }
+
+    private static string LayoutPatternLabel(PageLayoutPattern pattern) => pattern switch
+    {
+        PageLayoutPattern.HorizontalSingleColumn => "横書き1段",
+        PageLayoutPattern.HorizontalTwoColumn => "横書き2段",
+        PageLayoutPattern.VerticalSingleColumn => "縦書き1段",
+        PageLayoutPattern.VerticalTwoColumn => "縦書き2段",
+        PageLayoutPattern.HorizontalComplex => "横書き複雑段組み",
+        _ => pattern.ToString(),
+    };
 }

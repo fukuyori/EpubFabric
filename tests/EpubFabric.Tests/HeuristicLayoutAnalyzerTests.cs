@@ -71,6 +71,29 @@ public class HeuristicLayoutAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzePage_VerticalTwoColumn_ReadsUpperBandThenLowerBand()
+    {
+        var lines = new List<TextLine>
+        {
+            new(new BoundingBox(0.70, 0.08, 0.03, 0.38), "上段右の本文です", 0.9),
+            new(new BoundingBox(0.65, 0.08, 0.03, 0.38), "上段左の本文です。", 0.9),
+            new(new BoundingBox(0.70, 0.55, 0.03, 0.38), "下段右の本文です", 0.9),
+            new(new BoundingBox(0.65, 0.55, 0.03, 0.38), "下段左の本文です。", 0.9),
+        };
+        var profile = new PageLayoutProfile(PageLayoutPattern.VerticalTwoColumn, 0.95, 0.5);
+
+        var blocks = _analyzer.AnalyzePage(
+            pageNumber: 1,
+            lines,
+            writingMode: WritingMode.Vertical,
+            layoutProfile: profile);
+
+        Assert.Equal(
+            ["上段右の本文です", "上段左の本文です。", "下段右の本文です", "下段左の本文です。"],
+            blocks.OrderBy(block => block.ReadingOrder).Select(block => block.OcrText));
+    }
+
+    [Fact]
     public void AnalyzePage_HugeTextMidPage_IsDecorativeNotChapterTitle()
     {
         // 挿絵・作例内の巨大な文字（漫画の台詞など）はページ上部にないため章タイトルにしない。

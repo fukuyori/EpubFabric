@@ -177,9 +177,8 @@ public sealed class ConversionPipeline
                 var pageBlocks = new List<PageBlock>();
                 string? fallbackPdfText = null;
                 var requiresOcr = !pageInfo.HasText || options.ForceOcr;
-                var pageWritingMode = options.WritingMode == WritingModeSetting.Vertical
-                    ? WritingMode.Vertical
-                    : WritingMode.Horizontal;
+                var pageLayoutProfile = DefaultLayoutProfile();
+                var pageWritingMode = pageLayoutProfile.WritingMode;
 
                 if (pageInfo.HasText && !options.ForceOcr)
                 {
@@ -189,9 +188,11 @@ public sealed class ConversionPipeline
 
                     if (assessment.IsUsable)
                     {
-                        pageWritingMode = ResolveWritingMode(textLines);
+                        pageLayoutProfile = ResolveLayoutProfile(textLines);
+                        pageWritingMode = pageLayoutProfile.WritingMode;
                         detectedPageModes.Add(pageWritingMode);
-                        pageBlocks = BuildTextBlocks(pageNumber, displayImagePath, textLines, pageWritingMode);
+                        ReportLayout(pageNumber, pageLayoutProfile);
+                        pageBlocks = BuildTextBlocks(pageNumber, displayImagePath, textLines, pageLayoutProfile);
                     }
                     else
                     {
@@ -244,9 +245,11 @@ public sealed class ConversionPipeline
                             Report(pageNumber, $"  低信頼のOCRゴミ行{ocrResult.DroppedLineCount}件を除外しました。");
                         }
 
-                        pageWritingMode = ResolveWritingMode(ocrLines);
+                        pageLayoutProfile = ResolveLayoutProfile(ocrLines);
+                        pageWritingMode = pageLayoutProfile.WritingMode;
                         detectedPageModes.Add(pageWritingMode);
-                        pageBlocks = BuildTextBlocks(pageNumber, displayImagePath, ocrLines, pageWritingMode);
+                        ReportLayout(pageNumber, pageLayoutProfile);
+                        pageBlocks = BuildTextBlocks(pageNumber, displayImagePath, ocrLines, pageLayoutProfile);
                     }
                     catch (Exception ex) when (ex is OcrModelDownloadException or InvalidOperationException)
                     {
@@ -286,6 +289,8 @@ public sealed class ConversionPipeline
                     Width = pageInfo.WidthPoints,
                     Height = pageInfo.HeightPoints,
                     WritingMode = pageWritingMode,
+                    LayoutPattern = pageLayoutProfile.Pattern,
+                    LayoutPatternConfidence = pageLayoutProfile.Confidence,
                     Status = pageBlocks.Count > 0 ? PageProcessingStatus.OcrCompleted : PageProcessingStatus.Error,
                 };
                 page.Blocks.AddRange(pageBlocks);
@@ -397,27 +402,46 @@ public sealed class ConversionPipeline
             ocrService?.Dispose();
         }
 
-        // 書字方向: Autoでは行の縦横比からページ単位に判定する（縦書き誌の中の
-        // 横書き情報ページも正しい読み順になる）。強制指定時はそれに従う。
-        WritingMode ResolveWritingMode(IReadOnlyList<TextLine> lines) => options.WritingMode switch
+        PageLayoutProfile DefaultLayoutProfile() => new(
+            options.WritingMode == WritingModeSetting.Vertical
+                ? PageLayoutPattern.VerticalSingleColumn
+                : PageLayoutPattern.HorizontalSingleColumn,
+            0);
+
+        // 書字方向を決めた後、同じ読み座標上で1段・2段を明示分類する。
+        PageLayoutProfile ResolveLayoutProfile(IReadOnlyList<TextLine> lines) =>
+            PageLayoutPatternDetector.Detect(
+                lines,
+                options.WritingMode switch
+                {
+                    WritingModeSetting.Vertical => WritingMode.Vertical,
+                    WritingModeSetting.Horizontal => WritingMode.Horizontal,
+                    _ => null,
+                });
+
+        void ReportLayout(int pageNumber, PageLayoutProfile profile)
         {
-            WritingModeSetting.Vertical => WritingMode.Vertical,
-            WritingModeSetting.Horizontal => WritingMode.Horizontal,
-            _ => WritingModeDetector.DetectPageMode(lines),
-        };
+            var direction = profile.WritingMode == WritingMode.Vertical ? "縦書き" : "横書き";
+            var columns = profile.UsesGenericColumnDetection ? "複雑段組み" : $"{profile.ColumnCount}段";
+            Report(pageNumber, $"  レイアウト: {direction}{columns}（信頼度{profile.Confidence:0.00}）");
+        }
 
         // 固定レイアウトでは全テキスト行を座標付きのまま保持する。
         // リフロー型ではレイアウト解析と段落統合を適用し、図ブロックの画像を切り出す。
-        List<PageBlock> BuildTextBlocks(int pageNumber, string imagePath, IReadOnlyList<TextLine> lines, WritingMode writingMode) =>
+        List<PageBlock> BuildTextBlocks(
+            int pageNumber,
+            string imagePath,
+            IReadOnlyList<TextLine> lines,
+            PageLayoutProfile layoutProfile) =>
             options.PreserveAllTextLines
-                ? textLayerBlockBuilder.Build(pageNumber, lines, writingMode)
-                : AnalyzeLayout(pageNumber, imagePath, lines, writingMode);
+                ? textLayerBlockBuilder.Build(pageNumber, lines, layoutProfile.WritingMode, layoutProfile)
+                : AnalyzeLayout(pageNumber, imagePath, lines, layoutProfile);
 
         List<PageBlock> AnalyzeLayout(
             int pageNumber,
             string imagePath,
             IReadOnlyList<TextLine> lines,
-            WritingMode writingMode)
+            PageLayoutProfile layoutProfile)
         {
             // 太字見出し検出用に行のインク密度を測る（高さが本文と同じゴシック見出し対策）。
             lines = inkDensityMeasurer.Measure(imagePath, lines);
@@ -425,8 +449,13 @@ public sealed class ConversionPipeline
             var textBounds = lines.Select(l => l.Bounds).ToList();
             var regions = regionDetector.DetectRegions(imagePath, textBounds);
             var blocks = paragraphMerger.Merge(
-                layoutAnalyzer.AnalyzePage(pageNumber, lines, regions, writingMode),
-                writingMode);
+                layoutAnalyzer.AnalyzePage(
+                    pageNumber,
+                    lines,
+                    regions,
+                    layoutProfile.WritingMode,
+                    layoutProfile),
+                layoutProfile.WritingMode);
 
             foreach (var figureBlock in blocks.Where(b => b.Type == BlockType.Figure))
             {

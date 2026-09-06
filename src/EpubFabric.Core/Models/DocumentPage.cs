@@ -16,6 +16,10 @@ public sealed class DocumentPage
 
     public WritingMode WritingMode { get; set; }
 
+    public PageLayoutPattern LayoutPattern { get; set; }
+
+    public double LayoutPatternConfidence { get; set; }
+
     public List<PageBlock> Blocks { get; init; } = [];
 
     public PageProcessingStatus Status { get; set; }

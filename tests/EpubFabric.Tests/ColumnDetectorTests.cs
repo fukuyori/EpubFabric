@@ -5,6 +5,62 @@ namespace EpubFabric.Tests;
 
 public sealed class ColumnDetectorTests
 {
+    [Fact]
+    public void DetectColumns_PreclassifiedSingleColumn_DoesNotSplitAtIncidentalGap()
+    {
+        var items = new List<Item>
+        {
+            new("上の短い行", new BoundingBox(0.1, 0.1, 0.3, 0.03)),
+            new("上の右寄せ行", new BoundingBox(0.6, 0.2, 0.3, 0.03)),
+            new("下の短い行", new BoundingBox(0.1, 0.3, 0.3, 0.03)),
+            new("下の右寄せ行", new BoundingBox(0.6, 0.4, 0.3, 0.03)),
+        };
+
+        var groups = ColumnDetector.DetectColumns(items, item => item.Bounds, 1, null);
+
+        Assert.Single(groups);
+        Assert.Equal(4, groups[0].Count);
+    }
+
+    [Fact]
+    public void DetectColumns_PreclassifiedTwoColumn_UsesSpecifiedGutter()
+    {
+        var items = new List<Item>
+        {
+            new("左1", new BoundingBox(0.1, 0.1, 0.35, 0.03)),
+            new("右1", new BoundingBox(0.55, 0.1, 0.35, 0.03)),
+            new("左2", new BoundingBox(0.1, 0.2, 0.35, 0.03)),
+            new("右2", new BoundingBox(0.55, 0.2, 0.35, 0.03)),
+        };
+
+        var groups = ColumnDetector.DetectColumns(items, item => item.Bounds, 2, 0.5);
+
+        Assert.Equal(2, groups.Count);
+        Assert.Equal(["左1", "左2"], groups[0].Select(item => item.Name));
+        Assert.Equal(["右1", "右2"], groups[1].Select(item => item.Name));
+    }
+
+    [Fact]
+    public void DetectColumns_PreclassifiedTwoColumn_ReadsSpanningLeadBeforeBothColumns()
+    {
+        var items = new List<Item>
+        {
+            new("全幅リード", new BoundingBox(0.08, 0.08, 0.84, 0.08)),
+            new("左1", new BoundingBox(0.08, 0.20, 0.38, 0.03)),
+            new("右1", new BoundingBox(0.54, 0.20, 0.38, 0.03)),
+            new("左2", new BoundingBox(0.08, 0.25, 0.38, 0.03)),
+            new("右2", new BoundingBox(0.54, 0.25, 0.38, 0.03)),
+        };
+
+        var ordered = ColumnDetector
+            .DetectColumns(items, item => item.Bounds, 2, 0.5)
+            .SelectMany(group => group.OrderBy(item => item.Bounds.Y))
+            .Select(item => item.Name)
+            .ToList();
+
+        Assert.Equal(["全幅リード", "左1", "左2", "右1", "右2"], ordered);
+    }
+
     private sealed record Item(string Name, BoundingBox Bounds);
 
     private static List<string> Order(IEnumerable<Item> items) =>

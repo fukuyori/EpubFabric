@@ -28,6 +28,8 @@ public class EfprojStoreTests
             ProcessedImagePath = imagePath,
             PreviewImagePath = imagePath,
             WritingMode = WritingMode.Horizontal,
+            LayoutPattern = PageLayoutPattern.HorizontalTwoColumn,
+            LayoutPatternConfidence = 0.93,
         };
         page.Blocks.Add(block);
 
@@ -52,6 +54,8 @@ public class EfprojStoreTests
             Assert.Equal("誤認識されたテキスト", reloadedBlock.OcrText);
             Assert.Null(reloadedBlock.CorrectedText);
             Assert.False(reloadedBlock.IsManuallyEdited);
+            Assert.Equal(PageLayoutPattern.HorizontalTwoColumn, reloaded.Pages.Single().LayoutPattern);
+            Assert.Equal(0.93, reloaded.Pages.Single().LayoutPatternConfidence);
 
             // 校正: テキストファイルを直接編集する（GUI校正画面の代替）。
             var textPath = Path.Combine(projectDirectory, "blocks", "text", $"{block.Id}.txt");

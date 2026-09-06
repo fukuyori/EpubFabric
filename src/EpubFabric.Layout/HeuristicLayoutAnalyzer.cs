@@ -43,7 +43,8 @@ public sealed class HeuristicLayoutAnalyzer
         int pageNumber,
         IReadOnlyList<TextLine> lines,
         IReadOnlyList<NonTextRegion>? regions = null,
-        WritingMode writingMode = WritingMode.Horizontal)
+        WritingMode writingMode = WritingMode.Horizontal,
+        PageLayoutProfile? layoutProfile = null)
     {
         regions ??= [];
 
@@ -103,7 +104,13 @@ public sealed class HeuristicLayoutAnalyzer
         items.AddRange(figureRegions.Select(r => new PositionedItem(r.Bounds, null, r, null)));
         items.AddRange(codeRegions.Select(c => new PositionedItem(c.Region.Bounds, null, c.Region, c.Lines)));
 
-        var columns = ColumnDetector.DetectColumns(items, i => i.Bounds);
+        var columns = layoutProfile is null || layoutProfile.UsesGenericColumnDetection
+            ? ColumnDetector.DetectColumns(items, item => item.Bounds)
+            : ColumnDetector.DetectColumns(
+                items,
+                item => item.Bounds,
+                layoutProfile.ColumnCount,
+                layoutProfile.GutterPosition);
 
         var blocks = new List<PageBlock>(items.Count);
         var figureBlocks = new List<PageBlock>();

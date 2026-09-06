@@ -65,6 +65,77 @@ public static class ColumnDetector
     }
 
     /// <summary>
+    /// 事前分類済みの1段・2段レイアウトに従って項目を分割する。2段の場合は検出済みの
+    /// 段間位置を固定して使い、短い段落末行や図による別の空白を段間と誤認しない。
+    /// </summary>
+    public static List<List<T>> DetectColumns<T>(
+        IReadOnlyList<T> items,
+        Func<T, BoundingBox> boundsOf,
+        int expectedColumnCount,
+        double? gutterPosition)
+    {
+        if (items.Count == 0)
+        {
+            return [];
+        }
+
+        if (expectedColumnCount != 2 || gutterPosition is null)
+        {
+            return [items.ToList()];
+        }
+
+        var gutter = gutterPosition.Value;
+        var crossing = items.Where(item => Crosses(boundsOf(item), gutter)).ToList();
+        var nonCrossing = items.Except(crossing).ToList();
+        var leftCount = nonCrossing.Count(item => Center(boundsOf(item)) < gutter);
+        var rightCount = nonCrossing.Count - leftCount;
+
+        if (leftCount == 0 || rightCount == 0)
+        {
+            return [items.ToList()];
+        }
+
+        // 段間を跨ぐ見出し・リード文は、そのY位置で段組みをいったん区切る。
+        // 「左段全体→全幅リード→右段」のような順序になるのを防ぎ、
+        // 全幅要素→左段→右段、という紙面上の帯ごとの読み順にする。
+        var groups = new List<List<T>>();
+        var remaining = nonCrossing.ToList();
+        foreach (var spanningItem in crossing.OrderBy(item => boundsOf(item).Y))
+        {
+            var spanningBounds = boundsOf(spanningItem);
+            var spanningCenterY = spanningBounds.Y + spanningBounds.Height / 2;
+            var before = remaining
+                .Where(item => boundsOf(item).Y + boundsOf(item).Height / 2 < spanningCenterY)
+                .ToList();
+            AddColumnPair(groups, before, boundsOf, gutter);
+            remaining.RemoveAll(before.Contains);
+            groups.Add([spanningItem]);
+        }
+
+        AddColumnPair(groups, remaining, boundsOf, gutter);
+        return groups;
+    }
+
+    private static void AddColumnPair<T>(
+        List<List<T>> groups,
+        IReadOnlyList<T> items,
+        Func<T, BoundingBox> boundsOf,
+        double gutter)
+    {
+        var left = items.Where(item => Center(boundsOf(item)) < gutter).ToList();
+        var right = items.Where(item => Center(boundsOf(item)) >= gutter).ToList();
+        if (left.Count > 0)
+        {
+            groups.Add(left);
+        }
+
+        if (right.Count > 0)
+        {
+            groups.Add(right);
+        }
+    }
+
+    /// <summary>
     /// 段グループを読み順に並べる。縦に重なり合う段同士（同じ帯の左右の段）は左から右へ、
     /// 重ならない帯同士（見出し帯と本文など）は上から下へ並べる。段の開始Y座標だけで
     /// 並べると、同じ高さから始まる段組みの左右順が僅かなY差で入れ替わってしまうため。

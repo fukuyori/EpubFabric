@@ -7,6 +7,8 @@ namespace EpubFabric.Evaluation;
 /// </summary>
 public sealed record PageEvaluation(
     int PageNumber,
+    PageLayoutPattern LayoutPattern,
+    double LayoutPatternConfidence,
     int BlockCount,
     IReadOnlyDictionary<string, int> BlockCountsByType,
     int TextCharsTotal,
@@ -122,6 +124,8 @@ public sealed class LayoutEvaluator
 
         return new PageEvaluation(
             PageNumber: page.PageNumber,
+            LayoutPattern: page.LayoutPattern,
+            LayoutPatternConfidence: page.LayoutPatternConfidence,
             BlockCount: page.Blocks.Count,
             BlockCountsByType: countsByType,
             TextCharsTotal: textCharsTotal,

@@ -11,7 +11,11 @@ namespace EpubFabric.Layout;
 /// </summary>
 public sealed class TextLayerBlockBuilder
 {
-    public List<PageBlock> Build(int pageNumber, IReadOnlyList<TextLine> lines, WritingMode writingMode = WritingMode.Horizontal)
+    public List<PageBlock> Build(
+        int pageNumber,
+        IReadOnlyList<TextLine> lines,
+        WritingMode writingMode = WritingMode.Horizontal,
+        PageLayoutProfile? layoutProfile = null)
     {
         var validLines = lines
             .Where(line => !string.IsNullOrWhiteSpace(line.Text))
@@ -24,7 +28,15 @@ public sealed class TextLayerBlockBuilder
             ? line => Transpose(line.Bounds)
             : line => line.Bounds;
 
-        return ColumnDetector.DetectColumns(validLines, boundsOf)
+        var columns = layoutProfile is null || layoutProfile.UsesGenericColumnDetection
+            ? ColumnDetector.DetectColumns(validLines, boundsOf)
+            : ColumnDetector.DetectColumns(
+                validLines,
+                boundsOf,
+                layoutProfile.ColumnCount,
+                layoutProfile.GutterPosition);
+
+        return columns
             .SelectMany(column => column.OrderBy(line => boundsOf(line).Y).ThenBy(line => boundsOf(line).X))
             .Select((line, index) => new PageBlock
             {

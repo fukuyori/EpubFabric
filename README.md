@@ -18,7 +18,7 @@ See [CHANGELOG.md](CHANGELOG.md) for changes in each version.
 - **OCR**: Local OCR using RapidOcrNet and the multilingual PP-OCRv6 ONNX model, with Japanese support. Models are downloaded automatically on first use
   - Deskewing: Recognition uses a corrected image prepared only for OCR, and coordinates are transformed back to the original image; the displayed image is not modified
   - Low-confidence noise filtering: Prevents misrecognized lines from covers and decorative pages from entering the body
-- **Multi-column layouts**: Recursive gutter detection reproduces the correct reading order for two- to four-column layouts, including uneven column widths
+- **Layout pattern classification**: Classifies each page as horizontal single-column, horizontal two-column, vertical single-column, or vertical two-column, then applies pattern-specific reflow order. Complex horizontal layouts with three to four uneven columns fall back to recursive gutter detection
 - **Page enhancement** (`--enhance`): Normalizes paper-color white balance to remove yellowing and dullness, and uses smoothstep whitening to suppress bleed-through and uneven backgrounds. Because no geometric transformation is applied, text-layer coordinates are unaffected. Covers and full-page photographs are skipped automatically
 - **Optional Ollama integration**: Uses a local LLM to semantically correct block types and heading levels and to correct OCR errors. Multiple safeguards—including equal-length replacement only and URL protection—reject unintended LLM rewrites before they are applied
 - **Size optimization**: Recompresses page images at JPEG quality 85 with a maximum long edge of 2,200 pixels by default; both settings are configurable. Text-layer coordinates are unaffected
@@ -222,7 +222,7 @@ src/
   EpubFabric.Pdf          PDF loading, rasterization, and text-layer extraction (Docnet/PDFium)
   EpubFabric.Ocr          OCR (RapidOcrNet / PP-OCRv6), noise-line filtering, and model management
   EpubFabric.Imaging      Image processing (OpenCvSharp): figure detection and OCR preprocessing (deskewing)
-  EpubFabric.Layout       Layout analysis: headings, columns (ColumnDetector), and paragraph merging
+  EpubFabric.Layout       Layout analysis: four-pattern classification, columns (ColumnDetector), headings, and paragraph merging
   EpubFabric.Ollama       Ollama integration: block classification and OCR text correction
   EpubFabric.Document     Document structuring and chapter division
   EpubFabric.Epub         EPUB 3 package generation (fixed layout and reflow)
@@ -239,7 +239,7 @@ docs/
 
 1. **Rasterization**: Converts each page to PNG with PDFium at 300 dpi by default and composites it onto a white background
 2. **Text acquisition**: Extracts character coordinates from PDF pages whose text layer meets the quality threshold. All other pages use OCR: deskewing during preprocessing, PP-OCRv6 recognition, and noise-line removal based on confidence and character type
-3. **Layout analysis** (reflow only): Detects figures and boxed articles, estimates headings, detects columns, and merges paragraphs
+3. **Layout analysis** (reflow only): Detects figures and boxed articles, classifies horizontal/vertical single/two-column patterns, applies pattern-specific reading order, estimates headings, and merges paragraphs
 4. **Ollama correction** (optional): Semantically corrects block types and heading levels and fixes OCR recognition errors
 5. **EPUB generation**: Fixed layout uses page images with transparent text layers; reflow produces structured XHTML chapters. Page images are recompressed before packaging
 

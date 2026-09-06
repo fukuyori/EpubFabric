@@ -11,6 +11,8 @@ public class EvaluationReportBuilderTests
     {
         var pageEvaluation = new PageEvaluation(
             PageNumber: 1,
+            LayoutPattern: PageLayoutPattern.HorizontalTwoColumn,
+            LayoutPatternConfidence: 0.92,
             BlockCount: 2,
             BlockCountsByType: new Dictionary<string, int> { [nameof(BlockType.Body)] = 2 },
             TextCharsTotal: 10,
@@ -48,6 +50,7 @@ public class EvaluationReportBuilderTests
 
             var indexHtml = File.ReadAllText(Path.Combine(reportDirectory, "index.html"));
             Assert.Contains("ページ 1", indexHtml);
+            Assert.Contains("横書き2段（信頼度 0.92）", indexHtml);
             Assert.Contains("pages/page-0001.jpg", indexHtml);
             Assert.Contains("<p>本文</p>", indexHtml);
             Assert.Contains("テスト&lt;書籍&gt;", indexHtml);
@@ -55,6 +58,8 @@ public class EvaluationReportBuilderTests
             using var metrics = JsonDocument.Parse(File.ReadAllText(Path.Combine(reportDirectory, "metrics.json")));
             Assert.Equal(1, metrics.RootElement.GetProperty("PageCount").GetInt32());
             Assert.Equal(0.8, metrics.RootElement.GetProperty("TextCoverage").GetDouble());
+            var pageMetrics = metrics.RootElement.GetProperty("Pages")[0];
+            Assert.Equal("HorizontalTwoColumn", pageMetrics.GetProperty("LayoutPattern").GetString());
         }
         finally
         {
