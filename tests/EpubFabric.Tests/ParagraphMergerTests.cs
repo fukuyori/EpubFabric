@@ -128,6 +128,20 @@ public class ParagraphMergerTests
     }
 
     [Fact]
+    public void Merge_LeavesChapterTitleFragmentsForPageWideOrdering()
+    {
+        var blocks = new List<PageBlock>
+        {
+            Line("b1", 0.10, "言葉に囚", BlockType.ChapterTitle, x: 0.1, width: 0.3, height: 0.05, readingOrder: 0),
+            Line("b2", 0.16, "人工無能について", BlockType.ChapterTitle, x: 0.1, width: 0.4, height: 0.05, readingOrder: 1),
+        };
+
+        var headings = new ParagraphMerger().Merge(blocks);
+
+        Assert.Equal(2, headings.Count);
+    }
+
+    [Fact]
     public void Merge_VerticalText_JoinsLinesFromRightToLeft()
     {
         var blocks = new List<PageBlock>

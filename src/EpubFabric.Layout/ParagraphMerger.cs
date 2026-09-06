@@ -163,7 +163,7 @@ public sealed class ParagraphMerger
         if (lastLine.Type != next.Type
             || lastLine.TextSource != next.TextSource
             || next.Type is not (BlockType.Body or BlockType.Aside
-                or BlockType.ChapterTitle or BlockType.SectionHeading or BlockType.Subheading))
+                or BlockType.SectionHeading or BlockType.Subheading))
         {
             return false;
         }

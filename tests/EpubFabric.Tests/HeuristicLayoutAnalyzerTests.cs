@@ -376,6 +376,27 @@ public class HeuristicLayoutAnalyzerTests
     }
 
     [Fact]
+    public void AnalyzePage_LargeArticleTitleInsideTopFigure_IsPreservedForReflowStructure()
+    {
+        var lines = new List<TextLine>
+        {
+            new(new BoundingBox(0.18, 0.15, 0.45, 0.06), "小学校社会科への地理の復権", 0.9),
+            new(new BoundingBox(0.20, 0.26, 0.12, 0.025), "図中の小ラベル", 0.9),
+            new(new BoundingBox(0.1, 0.60, 0.6, 0.03), "図の外の本文です。", 0.9),
+        };
+        var regions = new List<NonTextRegion>
+        {
+            new(new BoundingBox(0.1, 0.08, 0.7, 0.45), NonTextRegionKind.Figure),
+        };
+
+        var blocks = _analyzer.AnalyzePage(pageNumber: 1, lines, regions);
+
+        Assert.Contains(blocks, block => block.OcrText == "小学校社会科への地理の復権");
+        Assert.DoesNotContain(blocks, block => block.OcrText == "図中の小ラベル");
+        Assert.Single(blocks, block => block.Type == BlockType.Figure);
+    }
+
+    [Fact]
     public void AnalyzePage_FigureRegion_ProducesFigureBlockInReadingOrder()
     {
         var lines = new List<TextLine>

@@ -191,6 +191,64 @@ public class EpubPackageBuilderTests
     }
 
     [Fact]
+    public void Build_記事ヘッダーと論文向け本文組版を収録する()
+    {
+        var author = new PageBlock
+        {
+            Id = "author",
+            PageNumber = 1,
+            Bounds = new BoundingBox(0, 0, 1, 1),
+            Type = BlockType.Author,
+            OcrText = "山田太郎",
+        };
+        var body = new PageBlock
+        {
+            Id = "body",
+            PageNumber = 1,
+            Bounds = new BoundingBox(0, 0, 1, 1),
+            Type = BlockType.Body,
+            OcrText = "本文です。",
+        };
+        var chapter = new DocumentChapter { Id = "chapter-001", Title = "論文タイトル" };
+        chapter.BlockIds.AddRange([author.Id, body.Id]);
+        var project = new EpubFabricProject
+        {
+            Id = Guid.NewGuid(),
+            Title = "論文誌",
+            SourcePdfPath = "dummy.pdf",
+        };
+        var outputPath = Path.Combine(Path.GetTempPath(), $"epubfabric-test-{Guid.NewGuid():N}.epub");
+
+        try
+        {
+            new EpubPackageBuilder().Build(
+                project,
+                [chapter],
+                new Dictionary<string, PageBlock> { [author.Id] = author, [body.Id] = body },
+                outputPath);
+
+            using var zip = ZipFile.OpenRead(outputPath);
+            using var chapterReader = new StreamReader(zip.GetEntry("EPUB/text/chapter-001.xhtml")!.Open());
+            var xhtml = chapterReader.ReadToEnd();
+            Assert.Contains("<article>", xhtml);
+            Assert.Contains("class=\"article-header\"", xhtml);
+            Assert.Contains("class=\"byline\"", xhtml);
+
+            using var cssReader = new StreamReader(zip.GetEntry("EPUB/styles/book.css")!.Open());
+            var css = cssReader.ReadToEnd();
+            Assert.Contains("max-width: 42em", css);
+            Assert.Contains("text-indent: 1em", css);
+            Assert.Contains("Yu Mincho", css);
+            Assert.Contains("html.vertical figure", css);
+            Assert.Contains("max-height: 34em", css);
+        }
+        finally
+        {
+            File.Delete(outputPath);
+        }
+    }
+
+    [Fact]
     public void Build_縦書きリフローに縦書きCSS指定と右綴じを設定する()
     {
         var block = new PageBlock

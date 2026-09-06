@@ -61,6 +61,29 @@ public class SourceTableOfContentsClassifierTests
         Assert.All(page.Blocks, block => Assert.True(block.IsExcluded));
     }
 
+    [Fact]
+    public void Classify_ExcludesUnmarkedJapaneseMagazineContentsPage()
+    {
+        var page = Page(5,
+            Block("heading-1", BlockType.SectionHeading, "解説", 0),
+            Block("entry-1", BlockType.Subheading, "最初の記事", 1),
+            Block("page-1", BlockType.Body, "12", 2),
+            Block("entry-2", BlockType.Subheading, "二番目の記事", 3),
+            Block("page-2", BlockType.Body, "24", 4),
+            Block("entry-3", BlockType.SectionHeading, "三番目の記事", 5),
+            Block("page-3", BlockType.Body, "36", 6),
+            Block("entry-4", BlockType.Body, "四番目の記事", 7),
+            Block("page-4", BlockType.Body, "48", 8),
+            Block("author-1", BlockType.Body, "著者一", 9),
+            Block("author-2", BlockType.Body, "著者二", 10),
+            Block("footer", BlockType.Body, "次号予告", 11));
+
+        var changed = new SourceTableOfContentsClassifier().Classify([page]);
+
+        Assert.Equal(page.Blocks.Count, changed);
+        Assert.All(page.Blocks, block => Assert.True(block.IsExcluded));
+    }
+
     private static DocumentPage Page(int pageNumber, params PageBlock[] blocks)
     {
         var page = new DocumentPage

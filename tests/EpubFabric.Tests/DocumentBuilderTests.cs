@@ -128,6 +128,25 @@ public class DocumentBuilderTests
         Assert.True(duplicate.IsExcluded);
     }
 
+    [Fact]
+    public void BuildChapters_UsesConfidentJapaneseArticleTitleAndCarriesKickerIntoArticle()
+    {
+        var page = CreatePage(pageNumber: 1);
+        page.Blocks.Add(CreateBlock("front", BlockType.Body, "前付け", 0));
+        page.Blocks.Add(CreateBlock("kicker", BlockType.Kicker, "〈解説〉", 1));
+        var title = CreateBlock("title", BlockType.ChapterTitle, "科学を支援するAI：現状と課題", 2, 1);
+        title.ClassificationConfidence = 0.9;
+        page.Blocks.Add(title);
+        page.Blocks.Add(CreateBlock("body", BlockType.Body, "本文", 3));
+
+        var chapters = new DocumentBuilder().BuildChapters([page], "科学");
+
+        Assert.Equal(2, chapters.Count);
+        Assert.Equal(["front"], chapters[0].BlockIds);
+        Assert.Equal("科学を支援するAI：現状と課題", chapters[1].Title);
+        Assert.Equal(["kicker", "body"], chapters[1].BlockIds);
+    }
+
     private static PageBlock CreateBlock(string id, BlockType type, string text, int readingOrder, int? headingLevel = null) => new()
     {
         Id = id,

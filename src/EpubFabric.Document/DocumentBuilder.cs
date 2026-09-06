@@ -40,7 +40,9 @@ public sealed class DocumentBuilder
             if (block.Type is BlockType.ChapterTitle)
             {
                 var candidateTitle = string.IsNullOrWhiteSpace(block.CorrectedText) ? block.OcrText : block.CorrectedText;
-                if (string.IsNullOrWhiteSpace(block.CorrectedText) && !IsStructuralChapterTitle(candidateTitle))
+                if (string.IsNullOrWhiteSpace(block.CorrectedText)
+                    && block.ClassificationConfidence < 0.8
+                    && !IsStructuralChapterTitle(candidateTitle))
                 {
                     // 大きな節見出し・コード表のセル・本文断片が高さだけでChapterTitleに
                     // なっても章分割には使わない。h3へ降格し、本文の位置には残す。
@@ -71,8 +73,27 @@ public sealed class DocumentBuilder
                     continue;
                 }
 
+                // 「特集」「解説」「対談」などの記事区分は章題より前に現れるが、前の記事の
+                // 末尾ではなく新しい記事ヘッダーへ所属させる。
+                var carriedKickers = new List<string>();
+                if (sections.Count > 0)
+                {
+                    while (sections[^1].BlockIds.Count > 0)
+                    {
+                        var tailId = sections[^1].BlockIds[^1];
+                        var tail = orderedBlocks.First(candidate => candidate.Id == tailId);
+                        if (tail.Type != BlockType.Kicker)
+                        {
+                            break;
+                        }
+
+                        sections[^1].BlockIds.RemoveAt(sections[^1].BlockIds.Count - 1);
+                        carriedKickers.Insert(0, tailId);
+                    }
+                }
+
                 var title = string.IsNullOrWhiteSpace(block.CorrectedText) ? block.OcrText : block.CorrectedText;
-                sections.Add((title, block.HeadingLevel ?? 1, []));
+                sections.Add((title, block.HeadingLevel ?? 1, carriedKickers));
                 lastSectionIsFallback = false;
                 continue; // 見出し自体はTitleへ引き継ぐため、本文ブロックには含めない。
             }

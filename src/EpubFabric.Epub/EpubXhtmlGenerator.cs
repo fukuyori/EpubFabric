@@ -20,12 +20,37 @@ public sealed class EpubXhtmlGenerator
     {
         var chapterTitle = XmlTextSanitizer.Sanitize(chapter.Title);
         var titleTag = $"h{Math.Clamp(chapter.HeadingLevel, 1, 6)}";
-        var body = new XElement(Xhtml + "body", new XElement(Xhtml + titleTag, chapterTitle));
+        var chapterBlocks = chapter.BlockIds
+            .Select(id => blocksById.GetValueOrDefault(id))
+            .Where(block => block is not null)
+            .Cast<PageBlock>()
+            .ToList();
+        var leadingMetadata = chapterBlocks
+            .TakeWhile(block => block.Type is BlockType.Kicker or BlockType.Author or BlockType.Affiliation)
+            .ToList();
 
-        foreach (var element in GenerateBlockElements(chapter.BlockIds, blocksById))
+        var header = new XElement(Xhtml + "header", new XAttribute("class", "article-header"));
+        foreach (var kicker in leadingMetadata.Where(block => block.Type == BlockType.Kicker))
         {
-            body.Add(element);
+            header.Add(CreateElement(kicker, XmlTextSanitizer.Sanitize(kicker.CorrectedText ?? kicker.OcrText)));
         }
+
+        header.Add(new XElement(Xhtml + titleTag, chapterTitle));
+
+        foreach (var metadata in leadingMetadata.Where(block => block.Type is BlockType.Author or BlockType.Affiliation))
+        {
+            header.Add(CreateElement(metadata, XmlTextSanitizer.Sanitize(metadata.CorrectedText ?? metadata.OcrText)));
+        }
+
+        var article = new XElement(Xhtml + "article", header);
+        var contentIds = chapter.BlockIds.Skip(leadingMetadata.Count).ToList();
+
+        foreach (var element in GenerateBlockElements(contentIds, blocksById))
+        {
+            article.Add(element);
+        }
+
+        var body = new XElement(Xhtml + "body", new XAttribute("class", "publication"), article);
 
         var html = new XElement(
             Xhtml + "html",
@@ -130,6 +155,15 @@ public sealed class EpubXhtmlGenerator
         BlockType.SectionHeading => new XElement(Xhtml + "h2", new XAttribute("id", block.Id), text),
         BlockType.Subheading => new XElement(Xhtml + "h3", new XAttribute("id", block.Id), text),
         BlockType.Caption => new XElement(Xhtml + "p", new XAttribute("class", "caption"), text),
+        BlockType.Kicker => new XElement(Xhtml + "p", new XAttribute("class", "kicker"), text),
+        BlockType.Author => new XElement(Xhtml + "p", new XAttribute("class", "byline"), text),
+        BlockType.Affiliation => new XElement(Xhtml + "p", new XAttribute("class", "affiliation"), text),
+        BlockType.Abstract => new XElement(
+            Xhtml + "section",
+            new XAttribute("class", "abstract"),
+            new XAttribute(EpubOps + "type", "abstract"),
+            new XElement(Xhtml + "h2", "要旨"),
+            new XElement(Xhtml + "p", text)),
         BlockType.Aside => new XElement(Xhtml + "aside", new XAttribute(EpubOps + "type", "sidebar"), new XElement(Xhtml + "p", text)),
         BlockType.PullQuote => new XElement(Xhtml + "blockquote", new XElement(Xhtml + "p", text)),
         BlockType.Footnote => new XElement(Xhtml + "aside", new XAttribute(EpubOps + "type", "footnote"), new XElement(Xhtml + "p", text)),

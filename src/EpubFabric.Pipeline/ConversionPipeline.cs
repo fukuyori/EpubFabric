@@ -346,6 +346,17 @@ public sealed class ConversionPipeline
                     Report(pageCount, $"原PDF内の印刷目次{sourceTocExcludedCount}ブロックをEPUB本文から除外しました。");
                 }
 
+                var articleStructure = new ArticleStructureClassifier().Classify(pages);
+                if (articleStructure.ArticleTitles > 0
+                    || articleStructure.DemotedFalseHeadings > 0
+                    || articleStructure.ExcludedFurniture > 0)
+                {
+                    Report(
+                        pageCount,
+                        $"記事構造: 記事タイトル{articleStructure.ArticleTitles}件、著者・所属・要旨{articleStructure.MetadataBlocks}件、"
+                        + $"本文断片の誤見出し{articleStructure.DemotedFalseHeadings}件と柱・号数{articleStructure.ExcludedFurniture}件を補正しました。");
+                }
+
                 var crossPageMergeCount = paragraphMerger.MergeAcrossPages(pages);
                 if (crossPageMergeCount > 0)
                 {

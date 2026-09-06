@@ -62,6 +62,8 @@ public sealed class HeuristicLayoutAnalyzer
         }
 
         var boxedRegions = regions.Where(r => r.Kind == NonTextRegionKind.Boxed).ToList();
+        var preliminaryBodyHeight = lines.Count > 0 ? EstimateBodyLineHeight(lines) : 0;
+        var preservedFigureHeadings = new HashSet<TextLine>();
 
         // 図として検出された領域でも、内部がテキスト行で覆われていてコード的な内容なら
         // 画像化せずCodeブロックとしてテキストを保持する（0b(a): 罫線囲みのコード例対策）。
@@ -83,13 +85,33 @@ public sealed class HeuristicLayoutAnalyzer
             else
             {
                 figureRegions.Add(region);
+
+                // 雑誌・論文誌では、記事タイトルと著者を大きな扉絵の上へ組むことがある。
+                // 図領域内の全文字を消すと、画像は残ってもEPUBの章題・目次が失われる。
+                // ページ上部の大きな図に重なる、本文より明確に大きい短文だけをテキストとして
+                // 保持する。グラフ中の小さな軸ラベルなどは従来どおり図へ包含する。
+                var regionArea = region.Bounds.Width * region.Bounds.Height;
+                if (preliminaryBodyHeight > 0
+                    && regionArea >= 0.12
+                    && region.Bounds.Y < 0.4)
+                {
+                    foreach (var heading in contained.Where(line =>
+                        line.Text.Trim().Length is >= 3 and <= 80
+                        && line.Bounds.Height >= preliminaryBodyHeight * 1.5))
+                    {
+                        preservedFigureHeadings.Add(heading);
+                    }
+                }
             }
         }
 
         // 図・コード枠の内部にあるOCR行は、図画像またはCodeブロックに含まれるため、
         // 別の本文段落として重複させない。
         var consumedRegions = figureRegions.Concat(codeRegions.Select(c => c.Region)).ToList();
-        var effectiveLines = lines.Where(l => !consumedRegions.Any(f => OverlapsSignificantly(l.Bounds, f.Bounds))).ToList();
+        var effectiveLines = lines
+            .Where(line => preservedFigureHeadings.Contains(line)
+                || !consumedRegions.Any(region => OverlapsSignificantly(line.Bounds, region.Bounds)))
+            .ToList();
 
         if (effectiveLines.Count == 0 && figureRegions.Count == 0 && codeRegions.Count == 0)
         {

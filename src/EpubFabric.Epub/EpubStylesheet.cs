@@ -12,7 +12,114 @@ public static class EpubStylesheet
         }
 
         body {
-            line-height: 1.9;
+            box-sizing: border-box;
+            max-width: 42em;
+            margin: 0 auto;
+            padding: 4vw 5vw 8vw;
+            font-family: "Yu Mincho", "Hiragino Mincho ProN", "Noto Serif CJK JP", serif;
+            font-size: 1em;
+            line-height: 1.95;
+            text-align: justify;
+            hanging-punctuation: allow-end;
+            overflow-wrap: break-word;
+        }
+
+        html.vertical body {
+            max-width: none;
+            max-height: 42em;
+            margin: auto;
+        }
+
+        article {
+            orphans: 2;
+            widows: 2;
+        }
+
+        .article-header {
+            margin-block-end: 2.5em;
+            padding-block-end: 1.25em;
+            border-block-end: 1px solid currentColor;
+            text-align: start;
+        }
+
+        .article-header h1,
+        .article-header h2,
+        .article-header h3 {
+            margin: 0.25em 0 0.7em;
+            font-size: 2em;
+            line-height: 1.35;
+            letter-spacing: 0.04em;
+            text-wrap: balance;
+        }
+
+        .kicker {
+            margin: 0 0 0.6em;
+            font-family: "Yu Gothic", "Hiragino Sans", "Noto Sans CJK JP", sans-serif;
+            font-size: 0.85em;
+            font-weight: bold;
+            letter-spacing: 0.12em;
+        }
+
+        .byline {
+            margin: 0.4em 0 0;
+            font-weight: bold;
+            text-align: end;
+        }
+
+        .affiliation {
+            margin: 0.15em 0 0;
+            font-size: 0.82em;
+            text-align: end;
+            opacity: 0.8;
+        }
+
+        article > p {
+            margin: 0;
+            text-indent: 1em;
+        }
+
+        article > h2,
+        article > h3 {
+            margin-block: 2.1em 0.8em;
+            line-height: 1.45;
+            text-align: start;
+            break-after: avoid;
+        }
+
+        article > h2 {
+            padding-block-end: 0.25em;
+            border-block-end: 1px solid currentColor;
+            font-size: 1.35em;
+        }
+
+        article > h3 {
+            font-size: 1.12em;
+        }
+
+        article > h2 + p,
+        article > h3 + p,
+        article > figure + p,
+        article > aside + p {
+            text-indent: 0;
+        }
+
+        .abstract {
+            margin-block: 0 2.5em;
+            padding: 1em 1.25em;
+            border: 1px solid currentColor;
+            background: rgba(128, 128, 128, 0.07);
+            font-size: 0.92em;
+        }
+
+        .abstract h2 {
+            margin: 0 0 0.5em;
+            font-size: 1em;
+            font-family: "Yu Gothic", "Hiragino Sans", "Noto Sans CJK JP", sans-serif;
+            letter-spacing: 0.12em;
+        }
+
+        .abstract p {
+            margin: 0;
         }
 
         figure,
@@ -31,8 +138,13 @@ public static class EpubStylesheet
 
         /* 縦書き（html.vertical）では行が横に伸びるため、はみ出すのは高さ方向になる。 */
         html.vertical img {
-            max-height: 100vh;
+            max-height: 34em;
             width: auto;
+        }
+
+        html.vertical figure {
+            max-height: 36em;
+            overflow: hidden;
         }
 
         figure {
@@ -46,6 +158,8 @@ public static class EpubStylesheet
 
         figcaption {
             font-size: 0.85em;
+            line-height: 1.6;
+            text-align: start;
         }
 
         /* コード例は折り返さずに保持するため、はみ出す場合は枠内でスクロールさせる。 */

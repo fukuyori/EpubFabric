@@ -17,5 +17,9 @@ public enum BlockType
     Footer,
     PageNumber,
     Decorative,
-    Code
+    Code,
+    Kicker,
+    Author,
+    Affiliation,
+    Abstract
 }
