@@ -50,17 +50,18 @@
                         <DataTemplate x:DataType="local:ConversionItem">
                             <Grid ColumnSpacing="12" Padding="4,2">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0">
+                                <TextBlock Grid.Column="0" Text="{x:Bind Status, Mode=OneWay}" VerticalAlignment="Center"
+                                           MinWidth="104"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <StackPanel Grid.Column="1">
                                     <TextBlock Text="{x:Bind Name}" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Text="{x:Bind Location}" TextTrimming="CharacterEllipsis"
                                                Style="{StaticResource CaptionTextBlockStyle}"
                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </StackPanel>
-                                <TextBlock Grid.Column="1" Text="{x:Bind Status, Mode=OneWay}" VerticalAlignment="Center"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                             </Grid>
                         </DataTemplate>
                     </ListView.ItemTemplate>

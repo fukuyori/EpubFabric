@@ -195,6 +195,58 @@ public class HeuristicLayoutAnalyzerTests
         Assert.True(pageNumberBlock.IsExcluded);
     }
 
+    [Theory]
+    [InlineData("1. INTRODUCTION", BlockType.ChapterTitle, 1)]
+    [InlineData("1.1 FORTH LANGUAGE FEATURES", BlockType.SectionHeading, 2)]
+    [InlineData("3.2.1 Stack Operations", BlockType.Subheading, 3)]
+    [InlineData("Preface to the Third Edition", BlockType.ChapterTitle, 1)]
+    public void AnalyzePage_TextStructurePromotesEnglishHeading(string text, BlockType expectedType, int expectedLevel)
+    {
+        var lines = new List<TextLine>
+        {
+            new(new BoundingBox(0.1, 0.20, 0.6, 0.03), text, 0.9),
+            new(new BoundingBox(0.1, 0.30, 0.7, 0.03), "Ordinary body text on this page.", 0.9),
+            new(new BoundingBox(0.1, 0.34, 0.7, 0.03), "Another ordinary body line follows.", 0.9),
+        };
+
+        var block = _analyzer.AnalyzePage(pageNumber: 1, lines).Single(b => b.OcrText == text);
+
+        Assert.Equal(expectedType, block.Type);
+        Assert.Equal(expectedLevel, block.HeadingLevel);
+    }
+
+    [Fact]
+    public void AnalyzePage_NumberedBodySentence_IsNotPromotedToHeading()
+    {
+        var text = "1. see the table below.";
+        var lines = new List<TextLine>
+        {
+            new(new BoundingBox(0.1, 0.20, 0.6, 0.03), text, 0.9),
+            new(new BoundingBox(0.1, 0.30, 0.7, 0.03), "Ordinary body text on this page.", 0.9),
+            new(new BoundingBox(0.1, 0.34, 0.7, 0.03), "Another ordinary body line follows.", 0.9),
+        };
+
+        var block = _analyzer.AnalyzePage(pageNumber: 1, lines).Single(b => b.OcrText == text);
+
+        Assert.Equal(BlockType.Body, block.Type);
+    }
+
+    [Fact]
+    public void AnalyzePage_SmallMarkedTextNearBottom_IsFootnote()
+    {
+        var lines = new List<TextLine>
+        {
+            new(new BoundingBox(0.1, 0.20, 0.7, 0.03), "本文の一行目です。", 0.9),
+            new(new BoundingBox(0.1, 0.25, 0.7, 0.03), "本文の二行目です。", 0.9),
+            new(new BoundingBox(0.1, 0.75, 0.7, 0.02), "1. 脚注のテキストです。", 0.9),
+        };
+
+        var block = _analyzer.AnalyzePage(pageNumber: 1, lines).Single(b => b.OcrText.StartsWith("1."));
+
+        Assert.Equal(BlockType.Footnote, block.Type);
+        Assert.False(block.IsExcluded);
+    }
+
     [Fact]
     public void AnalyzePage_NoLines_ReturnsEmpty()
     {

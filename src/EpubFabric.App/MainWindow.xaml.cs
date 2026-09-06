@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 
 // To learn more about WinUI, the WinUI project structure,
 // and more about our project templates, see: http://aka.ms/winui-project-info.
@@ -14,6 +15,9 @@ namespace EpubFabric_App;
 /// </summary>
 public sealed partial class MainWindow : Window
 {
+    private bool _closeConfirmed;
+    private bool _closeConfirmationOpen;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -26,6 +30,51 @@ public sealed partial class MainWindow : Window
 
         // Navigate the root frame to the main page on startup.
         RootFrame.Navigate(typeof(MainPage));
+        AppWindow.Closing += OnAppWindowClosing;
+    }
+
+    /// <summary>
+    /// 変換中の誤操作で処理を失わないよう、終了前に確認する。
+    /// 一度終了が確認された後のClosingイベントは、そのまま通す。
+    /// </summary>
+    private async void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
+    {
+        if (_closeConfirmed || RootFrame.Content is not MainPage { IsConverting: true } mainPage)
+        {
+            return;
+        }
+
+        // Closingイベントはダイアログの応答を待てないため、いったん終了を取り消す。
+        args.Cancel = true;
+        if (_closeConfirmationOpen)
+        {
+            return;
+        }
+
+        _closeConfirmationOpen = true;
+        try
+        {
+            var dialog = new ContentDialog
+            {
+                XamlRoot = RootFrame.XamlRoot,
+                Title = "変換を中止して終了しますか？",
+                Content = "PDF の変換中です。終了すると現在の変換は中止されます。",
+                PrimaryButtonText = "終了する",
+                CloseButtonText = "変換を続ける",
+                DefaultButton = ContentDialogButton.Close,
+            };
+
+            if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+            {
+                mainPage.CancelConversion();
+                _closeConfirmed = true;
+                Close();
+            }
+        }
+        finally
+        {
+            _closeConfirmationOpen = false;
+        }
     }
 
     /// <summary>変換画面のオプション行が折り返さずに収まる幅。</summary>

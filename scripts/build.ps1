@@ -6,22 +6,22 @@ EpubFabric をビルドし、テストを実行する。
 ソリューション（EpubFabric.slnx）全体を復元・ビルドし、単体テストを実行する。
 CLI・GUI・テストがまとめて対象になる。
 
-コンパイルはすべてこのスクリプトが行う。scripts\publish.ps1 はコンパイルせず
+コンパイルはすべてこのスクリプトが行う。scripts\build-installer.ps1 はコンパイルせず
 （dotnet publish --no-build）、ここでできた成果物を配布物に仕立てるだけなので、
-既定では publish.ps1 の既定（Release / win-x64）に合わせて配布用ビルドまで作る。
+既定では build-installer.ps1 の既定（Release / win-x64）に合わせて配布用ビルドまで作る。
 
   .\scripts\build.ps1      ビルドとテスト
-  .\scripts\publish.ps1    配布フォルダーとインストーラーの作成
+  .\scripts\build-installer.ps1    配布フォルダーとインストーラーの作成
 
 いずれも引数なしで、この順に実行すればインストーラーまで出来上がる。
 
 デバッグしたいときだけ -Configuration Debug を付ける。
 
 .PARAMETER Configuration
-ビルド構成。既定は Release（publish.ps1 の既定に合わせる）。
+ビルド構成。既定は Release（build-installer.ps1 の既定に合わせる）。
 
 .PARAMETER Runtime
-配布用ビルドの対象ランタイム識別子。既定は win-x64 で、publish.ps1 がそのまま
+配布用ビルドの対象ランタイム識別子。既定は win-x64 で、build-installer.ps1 がそのまま
 配布できるよう自己完結型（.NETランタイム同梱）でCLIとGUIをビルドする。
 空文字を渡すと配布用ビルドを省略し、通常のビルド（フレームワーク依存）だけを行う。
 
@@ -78,7 +78,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 if ($Runtime) {
-    # 配布用ビルド。publish.ps1 は --no-build でこの出力を並べ直すだけなので、
+    # 配布用ビルド。build-installer.ps1 は --no-build でこの出力を並べ直すだけなので、
     # 自己完結型（ランタイム同梱）であることも含めてここで確定させる。
     # WinUI 3 は AnyCPU でビルドできないため、RID からプラットフォームを決める。
     $platform = switch -Wildcard ($Runtime) {
@@ -145,13 +145,13 @@ if ($guiExe) { Write-Host ("  GUI : {0}" -f $guiExe.FullName) }
 Write-Host ""
 
 if ($Runtime) {
-    # publish.ps1 の既定（Release / win-x64）と同じなら引数は要らない。
+    # build-installer.ps1 の既定（Release / win-x64）と同じなら引数は要らない。
     # 違うときだけ、そのまま貼って実行できるよう必要な引数を添える。
-    $publishOptions = ""
-    if ($Configuration -ne "Release") { $publishOptions += " -Configuration $Configuration" }
-    if ($Runtime -ne "win-x64") { $publishOptions += " -Runtime $Runtime" }
+    $installerOptions = ""
+    if ($Configuration -ne "Release") { $installerOptions += " -Configuration $Configuration" }
+    if ($Runtime -ne "win-x64") { $installerOptions += " -Runtime $Runtime" }
 
-    Write-Host ("配布物（フォルダー + インストーラー）を作る: .\scripts\publish.ps1{0}" -f $publishOptions)
+    Write-Host ("配布物（フォルダー + インストーラー）を作る: .\scripts\build-installer.ps1{0}" -f $installerOptions)
 }
 else {
     Write-Host "配布用ビルドを作る場合: .\scripts\build.ps1 -Configuration $Configuration -Runtime win-x64"

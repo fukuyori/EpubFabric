@@ -327,6 +327,15 @@ public sealed class ConversionPipeline
                 pages.Add(page);
             }
 
+            if (!options.PreserveAllTextLines)
+            {
+                var marginChangeCount = new RepeatedMarginClassifier().Classify(pages);
+                if (marginChangeCount > 0)
+                {
+                    Report(pageCount, $"全ページの反復を照合し、柱・フッター・ノンブル候補{marginChangeCount}件を再分類しました。");
+                }
+            }
+
             if (reviewRequiredCount > 0)
             {
                 Report(pageCount,$"{reviewRequiredCount} 件のブロックがOCR信頼度0.85未満のため要確認です。");

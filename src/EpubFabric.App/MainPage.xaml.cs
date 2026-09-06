@@ -28,6 +28,9 @@ public sealed partial class MainPage : Page
     private OutputLayout _lastLayout;
     private bool _lastCoverPageAsImage;
 
+    /// <summary>PDFからEPUBへの変換処理を実行中か。</summary>
+    public bool IsConverting => _cancellation is not null;
+
     public MainPage()
     {
         InitializeComponent();
@@ -44,7 +47,7 @@ public sealed partial class MainPage : Page
 
     /// <summary>
     /// 表示用のバージョン。ビルド時に埋め込まれる情報バージョンは
-    /// 「0.2.3+&lt;コミットハッシュ&gt;」の形になるため、ハッシュ部分は落とす。
+    /// 「0.3.0+&lt;コミットハッシュ&gt;」の形になるため、ハッシュ部分は落とす。
     /// </summary>
     private static string AppVersion()
     {
@@ -351,9 +354,12 @@ public sealed partial class MainPage : Page
 
     private void OnCancelClick(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
     {
-        _cancellation?.Cancel();
+        CancelConversion();
         CancelButton.IsEnabled = false;
     }
+
+    /// <summary>実行中の変換をキャンセルする。ウィンドウ終了時にも使用する。</summary>
+    public void CancelConversion() => _cancellation?.Cancel();
 
     private void OnOpenFolderClick(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
     {

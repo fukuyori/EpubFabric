@@ -3,10 +3,11 @@
 ;
 ; 必須の define:
 ;   AppVersion     - インストーラーのバージョン（例: 1.0.0）
-;   PublishDir     - publish.ps1 の CLI 出力ディレクトリ（epubfabric-cli.exe を含む。{app}\cli へ入る）
-;   GuiPublishDir  - publish.ps1 の GUI 出力ディレクトリ（EpubFabric.exe を含む。{app} 直下へ入る）
+;   PublishDir     - build-installer.ps1 の CLI 出力ディレクトリ（epubfabric-cli.exe を含む。{app}\cli へ入る）
+;   GuiPublishDir  - build-installer.ps1 の GUI 出力ディレクトリ（EpubFabric.exe を含む。{app} 直下へ入る）
 ;   OutputDir      - セットアップEXEの出力先ディレクトリ
 ;   IconFile       - セットアップEXEに使うアイコン（省略時は Inno Setup の既定）
+;   SignToolName   - ISCC の /S で登録する署名ツール名（省略時は署名しない）
 
 #ifndef AppVersion
   #define AppVersion "1.0.0"
@@ -45,6 +46,10 @@ ChangesEnvironment=yes
 UninstallDisplayIcon={app}\EpubFabric.exe
 #ifdef IconFile
 SetupIconFile={#IconFile}
+#endif
+#ifdef SignToolName
+SignTool={#SignToolName}
+SignedUninstaller=yes
 #endif
 
 [Languages]

@@ -5,6 +5,22 @@
 
 ## [未リリース]
 
+## [0.3.0] - 2026-09-06
+
+### 追加
+
+- 全ページを横断して反復する柱・フッター・ノンブルを判定し、反復しない余白テキストを本文へ戻すようにした
+- ページ下部の小さい文字と脚注記号を使った脚注検出を追加した
+- 英語の番号付き見出しと定型的な書籍見出しを、文字内容から補助判定するようにした
+- 配布スクリプトを `publish.ps1` から `build-installer.ps1` へ改名し、`-Sign` でCLI・GUI・インストーラー・アンインストーラーへ電子署名できるようにした
+
+## [0.2.4] - 2026-07-29
+
+### 修正
+
+- GUI の PDF 一覧で、各ファイルの処理状態を右端ではなく左端に表示するようにした
+- GUI で PDF の変換中に終了しようとした場合、変換を中止して終了するか確認するようにした
+
 ## [0.2.3] - 2026-07-29
 
 ### 追加
@@ -113,7 +129,9 @@
 - Windows GUI（WinUI 3）: 変換画面と 3 ペインの校正画面
 - 配布用スクリプトと Inno Setup インストーラー
 
-[未リリース]: https://github.com/fukuyori/EpubFabric/compare/v0.2.3...HEAD
+[未リリース]: https://github.com/fukuyori/EpubFabric/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/fukuyori/EpubFabric/compare/v0.2.4...v0.3.0
+[0.2.4]: https://github.com/fukuyori/EpubFabric/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/fukuyori/EpubFabric/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/fukuyori/EpubFabric/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/fukuyori/EpubFabric/compare/v0.2.0...v0.2.1

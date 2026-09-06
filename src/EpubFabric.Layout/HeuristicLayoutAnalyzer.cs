@@ -36,6 +36,8 @@ public sealed class HeuristicLayoutAnalyzer
     private const double MarginBand = 0.06; // 上下6%を柱・ノンブルの候補域とする。
     private const int RunningTextMaxLength = 30;
     private const double MaxCaptionGap = 0.03; // 図の下端からキャプション候補行までの最大距離。
+    private const double FootnoteBottomFraction = 0.66;
+    private const double FootnoteMaxHeightRatio = 0.85;
 
     public List<PageBlock> AnalyzePage(
         int pageNumber,
@@ -270,14 +272,17 @@ public sealed class HeuristicLayoutAnalyzer
             return BlockType.PageNumber;
         }
 
-        if (isNearTopMargin && isShort)
+        if (line.Bounds.Y >= FootnoteBottomFraction
+            && bodyHeight > 0
+            && line.Bounds.Height <= bodyHeight * FootnoteMaxHeightRatio
+            && BookTextClassifier.LooksLikeFootnote(line.Text))
         {
-            return BlockType.Header;
+            return BlockType.Footnote;
         }
 
-        if (isNearBottomMargin && isShort)
+        if (BookTextClassifier.ClassifyHeading(line.Text) is { } textHeading)
         {
-            return BlockType.Footer;
+            return textHeading;
         }
 
         var ratio = bodyHeight > 0 ? line.Bounds.Height / bodyHeight : 1.0;
@@ -323,6 +328,19 @@ public sealed class HeuristicLayoutAnalyzer
             && density < bodyDensity * BoldSubheadingDensityCeiling)
         {
             return BlockType.Subheading;
+        }
+
+        // 上下余白にある短い本文は、ここでは柱・フッター候補として段落統合から分離する。
+        // 文書全体で反復するかはRepeatedMarginClassifierが後から確認し、反復しない候補は
+        // 本文へ戻す。見出し・脚注として判定済みの行は候補へ降格させない。
+        if (byHeight == BlockType.Body && isNearTopMargin && isShort)
+        {
+            return BlockType.Header;
+        }
+
+        if (byHeight == BlockType.Body && isNearBottomMargin && isShort)
+        {
+            return BlockType.Footer;
         }
 
         return byHeight;
