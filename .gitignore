@@ -12,6 +12,9 @@
 # Locally generated EPUB output (not source)
 /output/
 
+# Local evaluation and conversion scratch files
+/tmp/
+
 # Local source PDFs used for manual conversion testing
 /sample/
 
