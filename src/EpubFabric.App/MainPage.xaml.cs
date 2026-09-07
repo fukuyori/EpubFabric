@@ -47,7 +47,7 @@ public sealed partial class MainPage : Page
 
     /// <summary>
     /// 表示用のバージョン。ビルド時に埋め込まれる情報バージョンは
-    /// 「0.3.0+&lt;コミットハッシュ&gt;」の形になるため、ハッシュ部分は落とす。
+    /// 「0.4.0+&lt;コミットハッシュ&gt;」の形になるため、ハッシュ部分は落とす。
     /// </summary>
     private static string AppVersion()
     {

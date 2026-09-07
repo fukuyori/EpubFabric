@@ -7,6 +7,19 @@
 
 ## [未リリース]
 
+## [0.4.0] - 2026-09-07
+
+### 追加
+
+- ページごとに横書き1段、横書き2段、縦書き1段、縦書き2段、横書き複雑レイアウトを分類し、レイアウト別の読み順でリフローする機能を追加
+- リフロー出力を、タイトル、キッカー、著者、所属、要旨、見出し、本文、図版、キャプション、脚注、参考文献からなる論文単位の構造として生成する機能を追加
+- ルートの英語ドキュメントとは別に、日本語版READMEと変更履歴を追加
+
+### 変更
+
+- 分断されたPDF文字行の再構成、ページをまたぐ段落の統合、原文目次ブロックの除外、構造見出し判定の厳格化により、複雑なPDFからのリフロー抽出を改善
+- 生成EPUBでコードブロック、図版、キャプション、論文境界をより適切に保持するよう改善
+
 ## [0.3.0] - 2026-09-06
 
 ### 追加
@@ -131,7 +144,8 @@
 - Windows GUI（WinUI 3）: 変換画面と 3 ペインの校正画面
 - 配布用スクリプトと Inno Setup インストーラー
 
-[未リリース]: https://github.com/fukuyori/EpubFabric/compare/v0.3.0...HEAD
+[未リリース]: https://github.com/fukuyori/EpubFabric/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/fukuyori/EpubFabric/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/fukuyori/EpubFabric/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/fukuyori/EpubFabric/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/fukuyori/EpubFabric/compare/v0.2.2...v0.2.3

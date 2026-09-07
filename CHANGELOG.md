@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-07
+
+### Added
+
+- Classify each page as horizontal single-column, horizontal two-column, vertical single-column, vertical two-column, or complex horizontal layout, and apply layout-specific reflow ordering
+- Structure reflow output as articles with titles, kickers, authors, affiliations, abstracts, headings, body text, figures, captions, footnotes, and references
+- Add separate Japanese README and changelog documents while keeping the root documentation in English
+
+### Changed
+
+- Improve reflow extraction from complex PDFs by reconciling fragmented PDF text lines, merging paragraphs across page boundaries, filtering source table-of-contents blocks, and tightening structural heading detection
+- Improve preservation of code blocks, figures, captions, and article boundaries in generated EPUB content
+
 ## [0.3.0] - 2026-09-06
 
 ### Added
@@ -131,7 +144,8 @@ Initial release, providing a complete workflow for converting PDFs—both scanne
 - Windows GUI (WinUI 3) with conversion and three-pane proofreading screens
 - Distribution scripts and an Inno Setup installer
 
-[Unreleased]: https://github.com/fukuyori/EpubFabric/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/fukuyori/EpubFabric/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/fukuyori/EpubFabric/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/fukuyori/EpubFabric/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/fukuyori/EpubFabric/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/fukuyori/EpubFabric/compare/v0.2.2...v0.2.3

@@ -93,7 +93,7 @@ By default, `build-installer.ps1` creates a setup executable. [Inno Setup 6](htt
 
 ```powershell
 .\scripts\build-installer.ps1
-# -> publish\installer\EpubFabric-Setup-0.3.0.exe
+# -> publish\installer\EpubFabric-Setup-0.4.0.exe
 
 # Specify a version (defaults to <Version> in Directory.Build.props)
 .\scripts\build-installer.ps1 -Version 1.0.0

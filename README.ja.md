@@ -93,7 +93,7 @@ cd EpubFabric
 
 ```powershell
 .\scripts\build-installer.ps1
-# → publish\installer\EpubFabric-Setup-0.3.0.exe
+# → publish\installer\EpubFabric-Setup-0.4.0.exe
 
 # バージョンを明示する場合（既定は Directory.Build.props の <Version>）
 .\scripts\build-installer.ps1 -Version 1.0.0
