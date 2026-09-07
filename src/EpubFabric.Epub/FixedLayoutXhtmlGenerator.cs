@@ -158,7 +158,7 @@ public sealed class FixedLayoutXhtmlGenerator
     private static string TextSourceName(TextSourceKind source) => source switch
     {
         TextSourceKind.PdfTextLayer => "pdf",
-        TextSourceKind.Ocr => "ocr",
+        TextSourceKind.Ocr or TextSourceKind.NdlOcr => "ocr",
         _ => "unknown",
     };
 }

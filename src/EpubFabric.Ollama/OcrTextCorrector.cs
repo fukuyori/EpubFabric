@@ -49,7 +49,7 @@ public sealed class OcrTextCorrector
     public async Task<int> CorrectPageAsync(DocumentPage page, CancellationToken cancellationToken = default)
     {
         var candidates = page.Blocks
-            .Where(b => b.TextSource == TextSourceKind.Ocr
+            .Where(b => (b.TextSource is TextSourceKind.Ocr or TextSourceKind.NdlOcr)
                 && !b.IsExcluded
                 && b.CorrectedText is null
                 && b.Type is not (BlockType.Figure or BlockType.Table or BlockType.Decorative)

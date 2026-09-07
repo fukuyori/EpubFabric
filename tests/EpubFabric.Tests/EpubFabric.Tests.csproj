@@ -33,6 +33,7 @@
     <ProjectReference Include="..\..\src\EpubFabric.Epub\EpubFabric.Epub.csproj" />
     <ProjectReference Include="..\..\src\EpubFabric.Evaluation\EpubFabric.Evaluation.csproj" />
     <ProjectReference Include="..\..\src\EpubFabric.Persistence\EpubFabric.Persistence.csproj" />
+    <ProjectReference Include="..\..\src\EpubFabric.Pipeline\EpubFabric.Pipeline.csproj" />
   </ItemGroup>
 
 </Project>

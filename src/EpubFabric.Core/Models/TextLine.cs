@@ -12,4 +12,8 @@ public sealed record TextLine(
     string Text,
     double Confidence,
     TextSourceKind Source = TextSourceKind.Unknown,
-    double? InkDensity = null);
+    double? InkDensity = null,
+    WritingMode? DetectedWritingMode = null,
+    int? SourceReadingOrder = null,
+    string? SourceType = null,
+    string? SourceRegionId = null);

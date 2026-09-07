@@ -8,4 +8,5 @@ public enum TextSourceKind
     Unknown,
     PdfTextLayer,
     Ocr,
+    NdlOcr,
 }

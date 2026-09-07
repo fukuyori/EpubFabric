@@ -126,21 +126,27 @@ public sealed class HeuristicLayoutAnalyzer
         items.AddRange(figureRegions.Select(r => new PositionedItem(r.Bounds, null, r, null)));
         items.AddRange(codeRegions.Select(c => new PositionedItem(c.Region.Bounds, null, c.Region, c.Lines)));
 
-        var columns = layoutProfile is null || layoutProfile.UsesGenericColumnDetection
-            ? ColumnDetector.DetectColumns(items, item => item.Bounds)
-            : ColumnDetector.DetectColumns(
-                items,
-                item => item.Bounds,
-                layoutProfile.ColumnCount,
-                layoutProfile.GutterPosition);
+        var orderedGroups = effectiveLines.Count > 0
+            && effectiveLines.All(line => line.SourceReadingOrder is not null)
+            ? new List<List<PositionedItem>> { OrderBySourceReadingOrder(items, writingMode) }
+            : layoutProfile is null || layoutProfile.UsesGenericColumnDetection
+                ? ColumnDetector.DetectColumns(items, item => item.Bounds)
+                : ColumnDetector.DetectColumns(
+                    items,
+                    item => item.Bounds,
+                    layoutProfile.ColumnCount,
+                    layoutProfile.GutterPosition);
 
         var blocks = new List<PageBlock>(items.Count);
         var figureBlocks = new List<PageBlock>();
         var readingOrder = 0;
 
-        foreach (var column in columns)
+        foreach (var column in orderedGroups)
         {
-            foreach (var item in column.OrderBy(i => i.Bounds.Y))
+            var orderedItems = effectiveLines.All(line => line.SourceReadingOrder is not null)
+                ? column
+                : column.OrderBy(item => item.Bounds.Y).ToList();
+            foreach (var item in orderedItems)
             {
                 var block = item switch
                 {
@@ -184,6 +190,122 @@ public sealed class HeuristicLayoutAnalyzer
         bounds.X,
         bounds.Height,
         bounds.Width);
+
+    private static List<PositionedItem> OrderBySourceReadingOrder(
+        IReadOnlyList<PositionedItem> items,
+        WritingMode writingMode)
+    {
+        var textItems = items
+            .Where(item => item.Line?.SourceReadingOrder is not null)
+            .ToList();
+        var lastOrder = textItems.Max(item => item.Line!.SourceReadingOrder!.Value);
+        var adjustedTextKeys = new Dictionary<int, double>();
+        var figureKeys = new Dictionary<NonTextRegion, double>();
+
+        foreach (var figureItem in items.Where(item => item.Region is { Kind: NonTextRegionKind.Figure }))
+        {
+            var figure = figureItem.Region!;
+            var figureBounds = PageBounds(figure.Bounds, writingMode);
+            var captions = textItems
+                .Where(textItem => textItem.Line!.SourceType == "キャプション")
+                .Where(textItem => IsCaptionForFigure(PageBounds(textItem.Bounds, writingMode), figureBounds))
+                .OrderBy(textItem => textItem.Line!.SourceReadingOrder)
+                .ToList();
+            if (captions.Count == 0)
+            {
+                continue;
+            }
+
+            var firstCaptionOrder = captions[0].Line!.SourceReadingOrder!.Value;
+            var lastCaptionOrder = captions[^1].Line!.SourceReadingOrder!.Value;
+            var precedingText = textItems
+                .Where(textItem => textItem.Line!.SourceType != "キャプション")
+                .Where(textItem => textItem.Line!.SourceReadingOrder < firstCaptionOrder)
+                .OrderByDescending(textItem => textItem.Line!.SourceReadingOrder)
+                .FirstOrDefault();
+
+            // 紙面上の図が文の途中へ割り込む場合、リフローでは文を先に完結させる。
+            // 次の句点行まで本文を続け、その直後へ図とキャプションをまとめて置く。
+            var placement = firstCaptionOrder - 0.25;
+            if (precedingText.Line is not null && !EndsWithTerminalPunctuation(precedingText.Line.Text))
+            {
+                var sentenceEnd = textItems
+                    .Where(textItem => textItem.Line!.SourceType != "キャプション")
+                    .Where(textItem => textItem.Line!.SourceReadingOrder > lastCaptionOrder)
+                    .OrderBy(textItem => textItem.Line!.SourceReadingOrder)
+                    .FirstOrDefault(textItem => EndsWithTerminalPunctuation(textItem.Line!.Text));
+                if (sentenceEnd.Line is not null)
+                {
+                    placement = sentenceEnd.Line!.SourceReadingOrder!.Value + 0.1;
+                    for (var index = 0; index < captions.Count; index++)
+                    {
+                        adjustedTextKeys[captions[index].Line!.SourceReadingOrder!.Value] = placement + 0.1 * (index + 1);
+                    }
+                }
+            }
+
+            figureKeys[figure] = placement;
+        }
+
+        double SortKey(PositionedItem item)
+        {
+            if (item.Line?.SourceReadingOrder is { } sourceOrder)
+            {
+                return adjustedTextKeys.GetValueOrDefault(sourceOrder, sourceOrder);
+            }
+
+            if (item.Region is { Kind: NonTextRegionKind.Figure } figure)
+            {
+                if (figureKeys.TryGetValue(figure, out var figureKey))
+                {
+                    return figureKey;
+                }
+
+                var figureBounds = PageBounds(figure.Bounds, writingMode);
+                var captionOrder = textItems
+                    .Where(textItem => textItem.Line!.SourceType == "キャプション")
+                    .Where(textItem => IsCaptionForFigure(
+                        PageBounds(textItem.Bounds, writingMode),
+                        figureBounds))
+                    .Select(textItem => textItem.Line!.SourceReadingOrder!.Value)
+                    .DefaultIfEmpty(int.MaxValue)
+                    .Min();
+                if (captionOrder != int.MaxValue)
+                {
+                    return captionOrder - 0.25;
+                }
+            }
+
+            return lastOrder + 1 + item.Bounds.Y;
+        }
+
+        return items
+            .OrderBy(SortKey)
+            .ThenBy(item => item.Bounds.Y)
+            .ThenBy(item => item.Bounds.X)
+            .ToList();
+    }
+
+    private static bool EndsWithTerminalPunctuation(string text)
+    {
+        var trimmed = text.TrimEnd();
+        return trimmed.Length > 0 && trimmed[^1] is '。' or '.' or '！' or '!' or '？' or '?';
+    }
+
+    private static BoundingBox PageBounds(BoundingBox bounds, WritingMode writingMode) =>
+        writingMode == WritingMode.Vertical ? FromReadingCoordinates(bounds) : bounds;
+
+    private static bool IsCaptionForFigure(BoundingBox caption, BoundingBox figure)
+    {
+        var gap = caption.Y - (figure.Y + figure.Height);
+        var overlapWidth = Math.Max(
+            0,
+            Math.Min(caption.X + caption.Width, figure.X + figure.Width) - Math.Max(caption.X, figure.X));
+        var narrowerWidth = Math.Min(caption.Width, figure.Width);
+        return gap is >= -0.02 and <= 0.08
+            && narrowerWidth > 0
+            && overlapWidth / narrowerWidth >= 0.3;
+    }
 
     private static PageBlock CreateFigureBlock(int pageNumber, int blockIndex, NonTextRegion region, int readingOrder) => new()
     {
@@ -279,7 +401,8 @@ public sealed class HeuristicLayoutAnalyzer
         int pageNumber, int blockIndex, TextLine line, double bodyHeight, double? bodyInkDensity, IReadOnlyList<NonTextRegion> boxedRegions, int readingOrder)
     {
         var isBoxed = boxedRegions.Any(b => OverlapsSignificantly(line.Bounds, b.Bounds));
-        var type = isBoxed ? BlockType.Aside : ClassifyLine(line, bodyHeight, bodyInkDensity);
+        var type = ClassifyExternalLineType(line.SourceType)
+            ?? (isBoxed ? BlockType.Aside : ClassifyLine(line, bodyHeight, bodyInkDensity));
         var isExcluded = type is BlockType.Header or BlockType.Footer or BlockType.PageNumber;
 
         return new PageBlock
@@ -291,12 +414,28 @@ public sealed class HeuristicLayoutAnalyzer
             OcrText = line.Text,
             OcrConfidence = line.Confidence,
             TextSource = line.Source,
+            SourceRegionId = line.SourceRegionId,
             ReadingOrder = readingOrder,
             HeadingLevel = HeadingLevelFor(type),
             IsExcluded = isExcluded,
             RequiresReview = line.Confidence < 0.85,
         };
     }
+
+    /// <summary>
+    /// 外部OCRの行種別は候補として限定的に利用する。本文は既存分類器へ渡し、
+    /// 著者・所属・章見出しのような意味分類はここで確定しない。
+    /// </summary>
+    private static BlockType? ClassifyExternalLineType(string? sourceType) => sourceType switch
+    {
+        "キャプション" => BlockType.Caption,
+        "注" or "割注" => BlockType.Footnote,
+        "柱" => BlockType.Header,
+        "ノンブル" => BlockType.PageNumber,
+        "文書タイトル" => BlockType.ChapterTitle,
+        "タイトル本文" => BlockType.SectionHeading,
+        _ => null,
+    };
 
     /// <summary>
     /// 図の直下にあり、水平方向に重なる本文行をキャプションとして関連付ける
@@ -318,6 +457,13 @@ public sealed class HeuristicLayoutAnalyzer
             for (var i = figureIndex + 1; i < blocks.Count && linkedCount < maxCaptionLines; i++)
             {
                 var candidate = blocks[i];
+                if (candidate is { Type: BlockType.Caption, TextSource: TextSourceKind.NdlOcr })
+                {
+                    candidate.RelatedBlockId = figure.Id;
+                    linkedCount++;
+                    continue;
+                }
+
                 if (candidate.Type != BlockType.Body)
                 {
                     break;

@@ -5,6 +5,20 @@ namespace EpubFabric.Tests;
 
 public class ParagraphMergerTests
 {
+    [Fact]
+    public void Merge_JoinsDigitsSplitAcrossAdjacentLinesWithoutSpace()
+    {
+        var blocks = new List<PageBlock>
+        {
+            Line("b1", 0.1, "19", width: 0.7, height: 0.03, readingOrder: 0),
+            Line("b2", 0.135, "88年生まれ", width: 0.7, height: 0.03, readingOrder: 1),
+        };
+
+        var result = new ParagraphMerger().Merge(blocks);
+
+        Assert.Equal("1988年生まれ", Assert.Single(result).OcrText);
+    }
+
     private static PageBlock Line(string id, double y, string text, BlockType type = BlockType.Body, double x = 0.1, double width = 0.8, double height = 0.02, int readingOrder = 0, int pageNumber = 1) => new()
     {
         Id = id,
@@ -139,6 +153,41 @@ public class ParagraphMergerTests
         var headings = new ParagraphMerger().Merge(blocks);
 
         Assert.Equal(2, headings.Count);
+    }
+
+    [Fact]
+    public void Merge_JoinsSectionHeadingFragmentsFromSameExternalRegion()
+    {
+        var first = Line(
+            "b1", 0.10, "言葉に囚", BlockType.SectionHeading,
+            x: 0.10, width: 0.30, height: 0.07, readingOrder: 0);
+        var second = Line(
+            "b2", 0.10, "われた私たちの科学と", BlockType.SectionHeading,
+            x: 0.42, width: 0.40, height: 0.07, readingOrder: 1);
+        first.SourceRegionId = "pp:1:doc_title";
+        second.SourceRegionId = "pp:1:doc_title";
+
+        var heading = Assert.Single(new ParagraphMerger().Merge([first, second]));
+
+        Assert.Equal("言葉に囚われた私たちの科学と", heading.OcrText);
+    }
+
+    [Fact]
+    public void Merge_JoinsChapterTitleFragmentsFromSameExternalRegion()
+    {
+        var first = Line(
+            "b1", 0.10, "言葉に囚", BlockType.ChapterTitle,
+            x: 0.10, width: 0.30, height: 0.07, readingOrder: 0);
+        var second = Line(
+            "b2", 0.10, "われた私たちの科学と", BlockType.ChapterTitle,
+            x: 0.42, width: 0.40, height: 0.07, readingOrder: 1);
+        first.SourceRegionId = "pp:1:doc_title";
+        second.SourceRegionId = "pp:1:doc_title";
+
+        var heading = Assert.Single(new ParagraphMerger().Merge([first, second]));
+
+        Assert.Equal(BlockType.ChapterTitle, heading.Type);
+        Assert.Equal("言葉に囚われた私たちの科学と", heading.OcrText);
     }
 
     [Fact]

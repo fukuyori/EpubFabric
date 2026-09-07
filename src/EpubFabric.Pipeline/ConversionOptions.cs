@@ -21,6 +21,22 @@ public sealed record OllamaPipelineOptions(string Endpoint, string Model);
 /// <summary>固定レイアウトEPUBへ収録するページ画像の再圧縮設定。</summary>
 public sealed record PageImageEncodingOptions(int JpegQuality = 85, int MaxSideLength = 2200);
 
+/// <summary>ローカルNDLOCR-Lite CLIを縦書きページだけで使用する実験設定。</summary>
+public sealed record NdlOcrPipelineOptions(
+    string PythonExecutable,
+    string ScriptPath,
+    TimeSpan Timeout,
+    double MinimumAverageConfidence = 0.85,
+    double MinimumVerticalLineShare = 0.60);
+
+/// <summary>ローカルPP-DocLayoutV2ランナーから図版候補を得る実験設定。</summary>
+public sealed record PpDocLayoutPipelineOptions(
+    string PythonExecutable,
+    string ScriptPath,
+    TimeSpan Timeout,
+    double MinimumStandaloneImageConfidence = 0.50,
+    double MinimumTextLineCoverage = 0.75);
+
 /// <summary>PDF→プロジェクト構築の設定一式。CLIとGUIの両方から使う。</summary>
 public sealed record ConversionOptions
 {
@@ -53,6 +69,15 @@ public sealed record ConversionOptions
     public WritingModeSetting WritingMode { get; init; } = WritingModeSetting.Auto;
 
     public OllamaPipelineOptions? Ollama { get; init; }
+
+    /// <summary>縦書きページでだけ試すNDLOCR-Lite設定。nullなら現在のRapidOCRだけを使う。</summary>
+    public NdlOcrPipelineOptions? NdlOcr { get; init; }
+
+    /// <summary>図版候補の和集合に使用するPP-DocLayoutV2設定。nullなら現在の画像処理だけを使う。</summary>
+    public PpDocLayoutPipelineOptions? PpDocLayout { get; init; }
+
+    /// <summary>外部バックエンドを実行するページ番号。nullなら対象となる全ページ。</summary>
+    public IReadOnlySet<int>? ExternalBackendPages { get; init; }
 }
 
 /// <summary>変換の進捗通知。PageNumber=0は前後処理などページに紐づかないメッセージ。</summary>

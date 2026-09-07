@@ -160,10 +160,15 @@ public sealed class ParagraphMerger
 
     private static bool CanMerge(PageBlock paragraph, PageBlock lastLine, PageBlock next, WritingMode writingMode)
     {
+        var sameExternalTitleRegion = lastLine.Type == next.Type
+            && next.Type is BlockType.ChapterTitle or BlockType.SectionHeading
+            && !string.IsNullOrWhiteSpace(lastLine.SourceRegionId)
+            && lastLine.SourceRegionId == next.SourceRegionId;
         if (lastLine.Type != next.Type
             || lastLine.TextSource != next.TextSource
-            || next.Type is not (BlockType.Body or BlockType.Aside
-                or BlockType.SectionHeading or BlockType.Subheading))
+            || (next.Type is not (BlockType.Body or BlockType.Aside
+                or BlockType.SectionHeading or BlockType.Subheading)
+                && !sameExternalTitleRegion))
         {
             return false;
         }
@@ -171,6 +176,13 @@ public sealed class ParagraphMerger
         if (lastLine.IsExcluded || next.IsExcluded || paragraph.IsManuallyEdited || next.IsManuallyEdited)
         {
             return false;
+        }
+
+        // PP-DocLayoutV2が一つのタイトル領域へまとめた断片は、紙面上で横に並ぶ
+        // 場合でも一つの見出しへ戻す。領域IDが一致する見出しだけに限定する。
+        if (sameExternalTitleRegion)
+        {
+            return true;
         }
 
         var lastBounds = ReadingBounds(lastLine, writingMode);
@@ -240,6 +252,13 @@ public sealed class ParagraphMerger
         // 行末ハイフンの直後へ空白を入れると "applica- tion" のように語が壊れる。
         // ハイフン自体が語の一部か組版上の分綴かは辞書なしでは確定できないため保持する。
         if (a[^1] == '-' && char.IsAsciiLetter(b[0]))
+        {
+            return a + b;
+        }
+
+        // 縦書きでは西暦などの横組み数字が複数行ボックスへ分割されることがある。
+        // 数字同士の境界へ欧文用スペースを入れると「19 88年」のように壊れる。
+        if (char.IsDigit(a[^1]) && char.IsDigit(b[0]))
         {
             return a + b;
         }

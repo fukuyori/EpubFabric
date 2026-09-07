@@ -28,6 +28,9 @@ public sealed class PageBlock
 
     public string? RelatedBlockId { get; set; }
 
+    /// <summary>外部解析で同じ領域に属した断片を限定的に再結合するための識別子。</summary>
+    public string? SourceRegionId { get; set; }
+
     public string? ExtractedImagePath { get; set; }
 
     public bool IsExcluded { get; set; }

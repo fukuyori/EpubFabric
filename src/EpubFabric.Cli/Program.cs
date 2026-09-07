@@ -41,6 +41,11 @@ catch (FileNotFoundException ex)
     Console.Error.WriteLine($"エラー: {ex.Message}");
     return 1;
 }
+catch (ArgumentException ex)
+{
+    Console.Error.WriteLine($"エラー: {ex.Message}");
+    return 1;
+}
 
 static int Unknown()
 {
@@ -80,6 +85,7 @@ static async Task<int> RunConvert(string[] args)
     var dpi = ParseDpi(options);
     var ollamaOptions = ParseOllamaOptions(options);
     var imageOptions = ParsePageImageOptions(options);
+    var externalBackends = ParseExternalBackendOptions(options);
     var coverImage = options.ContainsKey("--cover-image");
     var failed = 0;
 
@@ -113,7 +119,8 @@ static async Task<int> RunConvert(string[] args)
                 writingMode: ParseWritingMode(options),
                 forceOcr: options.ContainsKey("--force-ocr"),
                 language: options.GetValueOrDefault("--language"),
-                maxPages: ParseMaxPages(options));
+                maxPages: ParseMaxPages(options),
+                externalBackends: externalBackends);
 
             BuildEpub(project, layout, outputPath, imageOptions, coverImage);
             Console.WriteLine($"{LayoutLabel(layout)}EPUBを生成しました: {outputPath}");
@@ -148,6 +155,7 @@ static async Task<int> RunEvaluate(string[] args)
             $"{Path.GetFileNameWithoutExtension(inputPath)}-report");
     var dpi = ParseDpi(options);
     var ollamaOptions = ParseOllamaOptions(options);
+    var externalBackends = ParseExternalBackendOptions(options);
 
     var workDirectory = Path.Combine(Path.GetTempPath(), $"epubfabric-{Guid.NewGuid():N}");
     var (project, pages) = await BuildProjectFromPdf(
@@ -160,7 +168,8 @@ static async Task<int> RunEvaluate(string[] args)
         writingMode: ParseWritingMode(options),
         forceOcr: options.ContainsKey("--force-ocr"),
         language: options.GetValueOrDefault("--language"),
-        maxPages: ParseMaxPages(options));
+        maxPages: ParseMaxPages(options),
+        externalBackends: externalBackends);
 
     var blocksById = pages.SelectMany(p => p.Blocks).ToDictionary(b => b.Id);
     var summary = new LayoutEvaluator().Evaluate(pages);
@@ -231,6 +240,7 @@ static async Task<int> RunAnalyze(string[] args)
 
     var dpi = ParseDpi(options);
     var ollamaOptions = ParseOllamaOptions(options);
+    var externalBackends = ParseExternalBackendOptions(options);
     var workDirectory = Path.Combine(Path.GetTempPath(), $"epubfabric-{Guid.NewGuid():N}");
     var (project, _) = await BuildProjectFromPdf(
         inputPath,
@@ -242,7 +252,8 @@ static async Task<int> RunAnalyze(string[] args)
         writingMode: ParseWritingMode(options),
         forceOcr: options.ContainsKey("--force-ocr"),
         language: options.GetValueOrDefault("--language"),
-        maxPages: ParseMaxPages(options));
+        maxPages: ParseMaxPages(options),
+        externalBackends: externalBackends);
 
     new EfprojStore().Save(project, projectDirectory);
 
@@ -366,7 +377,8 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
     WritingModeSetting writingMode = WritingModeSetting.Auto,
     bool forceOcr = false,
     string? language = null,
-    int? maxPages = null)
+    int? maxPages = null,
+    ExternalBackendOptions? externalBackends = null)
 {
     var options = new ConversionOptions
     {
@@ -379,6 +391,9 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
         WritingMode = writingMode,
         Language = language,
         MaxPages = maxPages,
+        NdlOcr = externalBackends?.NdlOcr,
+        PpDocLayout = externalBackends?.PpDocLayout,
+        ExternalBackendPages = externalBackends?.PageNumbers,
         Ollama = ollamaOptions is { Enabled: true }
             ? new OllamaPipelineOptions(ollamaOptions.Endpoint, ollamaOptions.Model)
             : null,
@@ -457,6 +472,71 @@ static OllamaOptions ParseOllamaOptions(Dictionary<string, string> options) => n
     Endpoint: options.GetValueOrDefault("--ollama-endpoint", "http://localhost:11434"),
     Model: options.GetValueOrDefault("--ollama-model", "gemma4:12b"));
 
+static ExternalBackendOptions ParseExternalBackendOptions(Dictionary<string, string> options)
+{
+    var timeoutSeconds = 120.0;
+    if (options.TryGetValue("--external-timeout", out var timeoutValue)
+        && (!double.TryParse(timeoutValue, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out timeoutSeconds)
+            || timeoutSeconds <= 0))
+    {
+        throw new ArgumentException("--external-timeout には0より大きい秒数を指定してください。");
+    }
+
+    var timeout = TimeSpan.FromSeconds(timeoutSeconds);
+    var ndlScript = NonEmptyOption(options, "--ndlocr-script");
+    var ndlPython = NonEmptyOption(options, "--ndlocr-python");
+    if (ndlScript is null && ndlPython is not null)
+    {
+        throw new ArgumentException("--ndlocr-python を使用する場合は --ndlocr-script も指定してください。");
+    }
+
+    var ppScript = NonEmptyOption(options, "--pp-layout-script");
+    var ppPython = NonEmptyOption(options, "--pp-layout-python");
+    if (ppScript is null && ppPython is not null)
+    {
+        throw new ArgumentException("--pp-layout-python を使用する場合は --pp-layout-script も指定してください。");
+    }
+
+    IReadOnlySet<int>? pageNumbers = null;
+    if (options.TryGetValue("--backend-pages", out var pageValue))
+    {
+        var parsed = new HashSet<int>();
+        foreach (var token in pageValue.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!int.TryParse(token, out var pageNumber) || pageNumber <= 0)
+            {
+                throw new ArgumentException("--backend-pages は1以上のページ番号をカンマ区切りで指定してください。");
+            }
+
+            parsed.Add(pageNumber);
+        }
+
+        if (parsed.Count == 0)
+        {
+            throw new ArgumentException("--backend-pages にページ番号がありません。");
+        }
+
+        pageNumbers = parsed;
+    }
+
+    return new ExternalBackendOptions(
+        ndlScript is null
+            ? null
+            : new NdlOcrPipelineOptions(ResolveExecutable(ndlPython ?? "python"), Path.GetFullPath(ndlScript), timeout),
+        ppScript is null
+            ? null
+            : new PpDocLayoutPipelineOptions(ResolveExecutable(ppPython ?? "python"), Path.GetFullPath(ppScript), timeout),
+        pageNumbers);
+}
+
+static string? NonEmptyOption(Dictionary<string, string> options, string name) =>
+    options.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value) ? value : null;
+
+static string ResolveExecutable(string value) =>
+    Path.IsPathRooted(value) || value.Contains(Path.DirectorySeparatorChar) || value.Contains(Path.AltDirectorySeparatorChar)
+        ? Path.GetFullPath(value)
+        : value;
+
 static bool RequireExistingFile(string path)
 {
     if (File.Exists(path))
@@ -472,8 +552,8 @@ static void PrintUsage()
 {
     Console.WriteLine("使い方:");
     Console.WriteLine("  epubfabric-cli info <input.pdf>");
-    Console.WriteLine("  epubfabric-cli convert <input.pdf> [<input2.pdf> ...] [--output <output.epub|出力フォルダー>] [--layout <fixed|reflow>] [--dpi <dpi>] [--enhance] [--force-ocr] [--language <code>] [--max-pages <n>] [--vertical|--horizontal] [--cover-image] [--image-quality <1-100>] [--max-image-size <px>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
-    Console.WriteLine("  epubfabric-cli evaluate <input.pdf> [--report <report-dir>] [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
+    Console.WriteLine("  epubfabric-cli convert <input.pdf> [<input2.pdf> ...] [--output <output.epub|出力フォルダー>] [--layout <fixed|reflow>] [--dpi <dpi>] [--enhance] [--force-ocr] [--language <code>] [--max-pages <n>] [--vertical|--horizontal] [--cover-image] [--image-quality <1-100>] [--max-image-size <px>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>] [外部バックエンド設定]");
+    Console.WriteLine("  epubfabric-cli evaluate <input.pdf> [--report <report-dir>] [--dpi <dpi>] [--max-pages <n>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>] [外部バックエンド設定]");
     Console.WriteLine("  epubfabric-cli analyze <input.pdf> --project <book.efproj> [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric-cli export <book.efproj> --format epub [--output <output.epub>] [--layout <fixed|reflow>] [--cover-image] [--image-quality <1-100>] [--max-image-size <px>]");
     Console.WriteLine();
@@ -490,9 +570,18 @@ static void PrintUsage()
     Console.WriteLine("  --cover-image を指定すると、リフロー型でも1ページ目をテキスト化せずページ画像のまま表紙として収録します（表紙のOCR誤読が本文へ混入するのを防げます）。");
     Console.WriteLine("  --ollama を指定すると、Ollamaによる意味分類（見出し・本文などの補正）とOCR文字列の校正を行います（既定では無効）。");
     Console.WriteLine("  --ollama-model の既定値: gemma4:12b / --ollama-endpoint の既定値: http://localhost:11434");
+    Console.WriteLine("  外部バックエンド設定（実験機能・リフロー型のみ）:");
+    Console.WriteLine("    --ndlocr-script <ocr.py> [--ndlocr-python <python>] 縦書きページだけNDLOCR-Liteを試し、失敗時はRapidOCRへ戻します。");
+    Console.WriteLine("    --pp-layout-script <run_layout.py> [--pp-layout-python <python>] PP-DocLayoutV2の領域読み順と高信頼図版候補を試します。");
+    Console.WriteLine("    --backend-pages <15,21> で実行ページを限定できます。--external-timeout <秒> の既定値は120秒です。");
 }
 
 sealed record OllamaOptions(bool Enabled, string Endpoint, string Model);
+
+sealed record ExternalBackendOptions(
+    NdlOcrPipelineOptions? NdlOcr,
+    PpDocLayoutPipelineOptions? PpDocLayout,
+    IReadOnlySet<int>? PageNumbers);
 
 /// <summary>パイプラインの進捗メッセージを、従来どおりの形式でコンソールへ流す。</summary>
 sealed class ConsoleProgress : IProgress<ConversionProgress>
