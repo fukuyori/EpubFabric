@@ -3,7 +3,15 @@ using System.Xml;
 namespace EpubFabric.Pipeline;
 
 /// <summary>公式NDLOCR-Lite CLIをローカルPythonプロセスとして実行する。</summary>
-public sealed class NdlOcrService(NdlOcrPipelineOptions options)
+internal interface INdlOcrPageService : IDisposable
+{
+    Task<NdlOcrPageResult> RecognizePageAsync(
+        string imagePath,
+        string outputDirectory,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed class NdlOcrService(NdlOcrPipelineOptions options) : INdlOcrPageService
 {
     public async Task<NdlOcrPageResult> RecognizePageAsync(
         string imagePath,
@@ -40,5 +48,9 @@ public sealed class NdlOcrService(NdlOcrPipelineOptions options)
         {
             throw new ExternalBackendException($"NDLOCR-LiteのXML出力が不正です: {ex.Message}", ex);
         }
+    }
+
+    public void Dispose()
+    {
     }
 }

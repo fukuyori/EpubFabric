@@ -392,6 +392,7 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
         Language = language,
         MaxPages = maxPages,
         NdlOcr = externalBackends?.NdlOcr,
+        NativeNdlOcr = externalBackends?.NativeNdlOcr,
         PpDocLayout = externalBackends?.PpDocLayout,
         ExternalBackendPages = externalBackends?.PageNumbers,
         Ollama = ollamaOptions is { Enabled: true }
@@ -485,9 +486,15 @@ static ExternalBackendOptions ParseExternalBackendOptions(Dictionary<string, str
     var timeout = TimeSpan.FromSeconds(timeoutSeconds);
     var ndlScript = NonEmptyOption(options, "--ndlocr-script");
     var ndlPython = NonEmptyOption(options, "--ndlocr-python");
+    var ndlModelDirectory = NonEmptyOption(options, "--ndlocr-model-dir");
     if (ndlScript is null && ndlPython is not null)
     {
         throw new ArgumentException("--ndlocr-python を使用する場合は --ndlocr-script も指定してください。");
+    }
+
+    if (ndlScript is not null && ndlModelDirectory is not null)
+    {
+        throw new ArgumentException("--ndlocr-script と --ndlocr-model-dir は同時に指定できません。");
     }
 
     var ppScript = NonEmptyOption(options, "--pp-layout-script");
@@ -523,6 +530,9 @@ static ExternalBackendOptions ParseExternalBackendOptions(Dictionary<string, str
         ndlScript is null
             ? null
             : new NdlOcrPipelineOptions(ResolveExecutable(ndlPython ?? "python"), Path.GetFullPath(ndlScript), timeout),
+        ndlModelDirectory is null
+            ? null
+            : new NativeNdlOcrPipelineOptions(Path.GetFullPath(ndlModelDirectory)),
         ppScript is null
             ? null
             : new PpDocLayoutPipelineOptions(ResolveExecutable(ppPython ?? "python"), Path.GetFullPath(ppScript), timeout),
@@ -571,7 +581,8 @@ static void PrintUsage()
     Console.WriteLine("  --ollama を指定すると、Ollamaによる意味分類（見出し・本文などの補正）とOCR文字列の校正を行います（既定では無効）。");
     Console.WriteLine("  --ollama-model の既定値: gemma4:12b / --ollama-endpoint の既定値: http://localhost:11434");
     Console.WriteLine("  外部バックエンド設定（実験機能・リフロー型のみ）:");
-    Console.WriteLine("    --ndlocr-script <ocr.py> [--ndlocr-python <python>] 縦書きページだけNDLOCR-Liteを試し、失敗時はRapidOCRへ戻します。");
+    Console.WriteLine("    --ndlocr-model-dir <dir> Pythonを介さず、内蔵ONNX版NDLOCR-Liteを縦書きページで試します。");
+    Console.WriteLine("    --ndlocr-script <ocr.py> [--ndlocr-python <python>] 比較用に公式Python版NDLOCR-Liteを試します。");
     Console.WriteLine("    --pp-layout-script <run_layout.py> [--pp-layout-python <python>] PP-DocLayoutV2の領域読み順と高信頼図版候補を試します。");
     Console.WriteLine("    --backend-pages <15,21> で実行ページを限定できます。--external-timeout <秒> の既定値は120秒です。");
 }
@@ -580,6 +591,7 @@ sealed record OllamaOptions(bool Enabled, string Endpoint, string Model);
 
 sealed record ExternalBackendOptions(
     NdlOcrPipelineOptions? NdlOcr,
+    NativeNdlOcrPipelineOptions? NativeNdlOcr,
     PpDocLayoutPipelineOptions? PpDocLayout,
     IReadOnlySet<int>? PageNumbers);
 

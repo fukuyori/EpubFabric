@@ -35,9 +35,11 @@ public sealed class ConversionPipeline
         var ocrPreprocessor = new OcrImagePreprocessor();
         var inkDensityMeasurer = new LineInkDensityMeasurer();
         var pageEnhancer = options.EnhancePages ? new PageImageEnhancer() : null;
-        var ndlOcrService = options.NdlOcr is { } ndlOcrOptions
-            ? new NdlOcrService(ndlOcrOptions)
-            : null;
+        using INdlOcrPageService? ndlOcrService = options.NativeNdlOcr is { } nativeNdlOcrOptions
+            ? new NativeNdlOcrService(nativeNdlOcrOptions)
+            : options.NdlOcr is { } ndlOcrOptions
+                ? new NdlOcrService(ndlOcrOptions)
+                : null;
         var ppDocLayoutService = options.PpDocLayout is { } ppDocLayoutOptions
             ? new PpDocLayoutService(ppDocLayoutOptions)
             : null;
@@ -274,7 +276,7 @@ public sealed class ConversionPipeline
                         var rapidLayoutProfile = ResolveLayoutProfile(ocrLines);
                         if (!options.PreserveAllTextLines
                             && ndlOcrService is not null
-                            && options.NdlOcr is { } ndlOptions
+                            && (options.NativeNdlOcr is not null || options.NdlOcr is not null)
                             && ShouldRunExternalBackend(pageNumber)
                             && rapidLayoutProfile.WritingMode == WritingMode.Vertical)
                         {
@@ -284,8 +286,12 @@ public sealed class ConversionPipeline
                                     displayImagePath,
                                     Path.Combine(workDirectory, "ndlocr", $"page-{pageNumber:0000}"),
                                     cancellationToken);
-                                if (ndlResult.AverageConfidence >= ndlOptions.MinimumAverageConfidence
-                                    && ndlResult.VerticalLineShare >= ndlOptions.MinimumVerticalLineShare)
+                                var minimumAverageConfidence = options.NativeNdlOcr?.MinimumAverageConfidence
+                                    ?? options.NdlOcr!.MinimumAverageConfidence;
+                                var minimumVerticalLineShare = options.NativeNdlOcr?.MinimumVerticalLineShare
+                                    ?? options.NdlOcr!.MinimumVerticalLineShare;
+                                if (ndlResult.AverageConfidence >= minimumAverageConfidence
+                                    && ndlResult.VerticalLineShare >= minimumVerticalLineShare)
                                 {
                                     ocrLines = ndlResult.Lines;
                                     Report(

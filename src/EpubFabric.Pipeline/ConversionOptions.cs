@@ -29,6 +29,12 @@ public sealed record NdlOcrPipelineOptions(
     double MinimumAverageConfidence = 0.85,
     double MinimumVerticalLineShare = 0.60);
 
+/// <summary>Pythonを介さずONNX RuntimeでNDLOCR-Liteを実行する実験設定。</summary>
+public sealed record NativeNdlOcrPipelineOptions(
+    string ModelDirectory,
+    double MinimumAverageConfidence = 0.85,
+    double MinimumVerticalLineShare = 0.60);
+
 /// <summary>ローカルPP-DocLayoutV2ランナーから図版候補を得る実験設定。</summary>
 public sealed record PpDocLayoutPipelineOptions(
     string PythonExecutable,
@@ -72,6 +78,9 @@ public sealed record ConversionOptions
 
     /// <summary>縦書きページでだけ試すNDLOCR-Lite設定。nullなら現在のRapidOCRだけを使う。</summary>
     public NdlOcrPipelineOptions? NdlOcr { get; init; }
+
+    /// <summary>縦書きページでだけ試す内蔵ONNX版NDLOCR-Lite設定。</summary>
+    public NativeNdlOcrPipelineOptions? NativeNdlOcr { get; init; }
 
     /// <summary>図版候補の和集合に使用するPP-DocLayoutV2設定。nullなら現在の画像処理だけを使う。</summary>
     public PpDocLayoutPipelineOptions? PpDocLayout { get; init; }
