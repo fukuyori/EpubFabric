@@ -557,10 +557,18 @@ public sealed partial class ArticleStructureClassifier
         return -1;
     }
 
+    /// <summary>
+    /// 「KAGAKU」のようにラテン大文字だけで組まれた誌名か。
+    /// </summary>
+    /// <remarks>
+    /// 以前は「小文字のラテン文字を含まない」という条件だったため、和文だけの文字列が
+    /// すべて該当していた。誌名・号数の隣にある短いブロックを巻き添えで除外する用途に
+    /// 使うため、ラテン大文字であることを実際に確かめる。
+    /// </remarks>
     private static bool IsAllLatinCapital(string text)
     {
         var letters = text.Where(char.IsLetter).ToList();
-        return letters.Count >= 3 && letters.All(character => !char.IsAsciiLetter(character) || char.IsAsciiLetterUpper(character));
+        return letters.Count >= 3 && letters.All(char.IsAsciiLetterUpper);
     }
 
     private static bool IsRepeatedPublicationName(string text) =>

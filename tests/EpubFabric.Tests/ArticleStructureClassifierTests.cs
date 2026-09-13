@@ -86,6 +86,25 @@ public sealed class ArticleStructureClassifierTests
     }
 
     [Fact]
+    public void Classify_KeepsJapaneseNeighboursOfTheIssueLine()
+    {
+        // 誌名・号数の巻き添えで落とすのはラテン大文字の誌名だけにする。
+        // 隣に並んだ和文の短いブロック（キッカー、著者名、目次の一行）は本文として残す。
+        var page = Page(
+            Block("kicker", BlockType.Body, "特集 AIは科学をどう変えるのか", 0, 0.05, 0.02),
+            Block("issue", BlockType.Body, "Jan.2026Vol.96No.1", 1, 0.94, 0.02),
+            Block("author", BlockType.Body, "梶田隆章 かじたたかあき", 2, 0.95, 0.02),
+            Block("body", BlockType.Body, new string('本', 300), 3, 0.20, 0.50));
+
+        var result = new ArticleStructureClassifier().Classify([page]);
+
+        Assert.Equal(1, result.ExcludedFurniture);
+        Assert.True(page.Blocks.Single(block => block.Id == "issue").IsExcluded);
+        Assert.False(page.Blocks.Single(block => block.Id == "kicker").IsExcluded);
+        Assert.False(page.Blocks.Single(block => block.Id == "author").IsExcluded);
+    }
+
+    [Fact]
     public void Classify_DoesNotTreatDiagramLabelsAsTitleAndAuthors()
     {
         var page = Page(
