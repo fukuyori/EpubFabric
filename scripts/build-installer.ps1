@@ -346,7 +346,9 @@ if ($buildInstaller) {
         "/DAppVersion=$Version",
         "/DPublishDir=$outputDirectory",
         "/DGuiPublishDir=$guiOutputDirectory",
-        "/DOutputDir=$installerDirectory"
+        "/DOutputDir=$installerDirectory",
+        # Apache License 2.0 の4(a)(d)により、配布物にライセンス本文とNOTICEを含める。
+        "/DRepoRoot=$repoRoot"
     )
 
     $iconFile = Join-Path $repoRoot "src\EpubFabric.App\Assets\AppIcon.ico"

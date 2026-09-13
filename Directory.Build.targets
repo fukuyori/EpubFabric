@@ -1,0 +1,30 @@
+<Project>
+
+  <!--
+    OpenCvSharp4.runtime.win に含まれる opencv_videoio_ffmpeg*.dll（約28 MiB）を
+    ビルド出力と配布物から除く。
+
+    EpubFabric は OpenCV の動画入出力（VideoCapture / VideoWriter）を使わないため
+    実行には不要である。一方このDLLはFFmpegを取り込んでおり、同梱するとLGPLの
+    表示と再リンクに関する義務が生じる。使わないものを配布しない形で解消する。
+
+    OpenCVはこのDLLを動画入出力を要求されたときだけ動的に読み込むので、
+    画像処理だけを使う限り欠けていても影響しない。
+  -->
+  <Target Name="RemoveOpenCvFfmpegFromOutput" AfterTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <ReferenceCopyLocalPaths
+        Remove="@(ReferenceCopyLocalPaths)"
+        Condition="$([System.String]::Copy('%(Filename)').StartsWith('opencv_videoio_ffmpeg'))" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="RemoveOpenCvFfmpegFromPublish" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish
+        Remove="@(ResolvedFileToPublish)"
+        Condition="$([System.String]::Copy('%(Filename)').StartsWith('opencv_videoio_ffmpeg'))" />
+    </ItemGroup>
+  </Target>
+
+</Project>

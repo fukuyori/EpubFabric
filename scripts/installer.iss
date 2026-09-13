@@ -6,6 +6,7 @@
 ;   PublishDir     - build-installer.ps1 の CLI 出力ディレクトリ（epubfabric-cli.exe を含む。{app}\cli へ入る）
 ;   GuiPublishDir  - build-installer.ps1 の GUI 出力ディレクトリ（EpubFabric.exe を含む。{app} 直下へ入る）
 ;   OutputDir      - セットアップEXEの出力先ディレクトリ
+;   RepoRoot       - リポジトリのルート（LICENSE・NOTICE・THIRD-PARTY-NOTICES.md の取得元）
 ;   IconFile       - セットアップEXEに使うアイコン（省略時は Inno Setup の既定）
 ;   SignToolName   - ISCC の /S で登録する署名ツール名（省略時は署名しない）
 
@@ -20,6 +21,9 @@
 #endif
 #ifndef OutputDir
   #define OutputDir "."
+#endif
+#ifndef RepoRoot
+  #error "RepoRoot を /DRepoRoot=... で指定してください"
 #endif
 
 [Setup]
@@ -67,6 +71,10 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 ; ランタイムDLLの同名ファイルを持つため、同じフォルダーには混在させない。
 Source: "{#GuiPublishDir}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 Source: "{#PublishDir}\*"; DestDir: "{app}\cli"; Flags: recursesubdirs ignoreversion
+; Apache License 2.0 の4(a)(d)により、配布物へライセンス本文とNOTICEを含める。
+Source: "{#RepoRoot}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#RepoRoot}\NOTICE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#RepoRoot}\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\EpubFabric"; Filename: "{app}\EpubFabric.exe"; WorkingDir: "{app}"
