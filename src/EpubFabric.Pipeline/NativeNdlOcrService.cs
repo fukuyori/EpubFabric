@@ -10,7 +10,8 @@ namespace EpubFabric.Pipeline;
 // ndl-lab/ndlocr-lite at d25e0d415b607ad44459ca6b95c7512a54363935.
 // NDLOCR-Lite: Copyright (c) 2023 National Diet Library, Japan, CC BY 4.0.
 // This adaptation changes the runtime, image resizing, duplicate suppression,
-// error handling, and reading-order implementation for EpubFabric.
+// and error handling for EpubFabric. The reading order follows the upstream
+// recursive XY cut; see NdlOcrXyCutReadingOrder.
 
 /// <summary>
 /// NDLOCR-LiteのDEIM検出器とPARSeq認識器をONNX Runtimeで直接実行する。
@@ -282,40 +283,27 @@ public sealed class NativeNdlOcrService : INdlOcrPageService
         return tensor;
     }
 
+    /// <summary>
+    /// 公式版と同じ再帰XY切断で読み順を決める。独自の帯分割では、上下に分かれた
+    /// 記事帯をまたぐ列が本文の途中へ割り込む誤りが出たため、
+    /// <see cref="NdlOcrXyCutReadingOrder"/>へ置き換えた。
+    /// </summary>
     private static IReadOnlyList<RecognizedLine> AssignReadingOrder(IReadOnlyList<RecognizedLine> lines)
     {
-        var vertical = lines.Count(line => line.Detection.Height > line.Detection.Width) * 2 >= lines.Count;
-        if (!vertical)
-        {
-            return lines.OrderBy(line => line.Detection.Y1).ThenBy(line => line.Detection.X1).ToList();
-        }
+        var boxes = lines
+            .Select(line => new NdlOcrXyCutReadingOrder.LineBox(
+                line.Detection.X1,
+                line.Detection.Y1,
+                line.Detection.X2,
+                line.Detection.Y2))
+            .ToList();
 
-        // 縦組みでも、ページの上・中・下に独立した記事帯や図注が置かれる。
-        // 全行を単純に右から並べると別の帯が交互になるため、Y区間が接続する帯を
-        // 上から処理し、その帯の中だけを右から左へ並べる。
-        var medianHeight = lines.Select(line => line.Detection.Height).Order().ElementAt(lines.Count / 2);
-        var allowedGap = Math.Max(4, medianHeight / 12);
-        var bands = new List<List<RecognizedLine>>();
-        foreach (var line in lines.OrderBy(line => line.Detection.Y1))
-        {
-            var band = bands.FirstOrDefault(candidate =>
-                line.Detection.Y1 <= candidate.Max(item => item.Detection.Y2) + allowedGap
-                && line.Detection.Y2 >= candidate.Min(item => item.Detection.Y1) - allowedGap);
-            if (band is null)
-            {
-                bands.Add([line]);
-            }
-            else
-            {
-                band.Add(line);
-            }
-        }
-
-        return bands
-            .OrderBy(band => band.Min(line => line.Detection.Y1))
-            .SelectMany(band => band
-                .OrderByDescending(line => line.Detection.X1)
-                .ThenBy(line => line.Detection.Y1))
+        var ranks = NdlOcrXyCutReadingOrder.Solve(boxes);
+        return lines
+            .Select((line, index) => (Line: line, Rank: ranks[index], Index: index))
+            .OrderBy(item => item.Rank)
+            .ThenBy(item => item.Index)
+            .Select(item => item.Line)
             .ToList();
     }
 
