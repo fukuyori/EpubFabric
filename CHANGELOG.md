@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - List the third-party components carried in a distribution in `THIRD-PARTY-NOTICES.md`, and install `LICENSE`, `NOTICE`, and `THIRD-PARTY-NOTICES.md` alongside the application
 - Exclude `opencv_videoio_ffmpeg*.dll` (about 28 MiB) from build output and distributions. EpubFabric never uses OpenCV video input or output, so there is no reason to carry FFmpeg
 
+### Fixed
+
+- Fix the rule that drops the issue line so that it no longer takes short neighbouring blocks with it. Any text without lowercase Latin letters counted as an all-capital publication name, which removed kickers and author names from the body
+
 ## [0.4.0] - 2026-09-07
 
 ### Added
