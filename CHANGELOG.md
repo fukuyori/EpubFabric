@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Fall back to RapidOCR and the existing layout analysis whenever an external backend is absent, times out, exits abnormally, or reports low confidence. Without an external backend the default behavior is unchanged from 0.4.0
 - Replace the reading order of the built-in NDLOCR-Lite with the same recursive XY cut the official implementation uses, instead of the previous band splitting. This removes the cases where a column spanning two article bands was interleaved into the middle of a sentence
+- Drop the less confident of two adjacent lines in the built-in NDLOCR-Lite when they cover nearly the same area in reading order, which removes the duplicated headings and bylines
 
 ## [0.4.0] - 2026-09-07
 
