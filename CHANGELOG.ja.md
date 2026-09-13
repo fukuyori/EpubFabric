@@ -9,14 +9,14 @@
 
 ### 追加
 
-- リフロー解析の実験的な外部バックエンドを追加した。`--pp-layout-script` でPP-DocLayoutV2による領域の読み順と高信頼な図版候補を、`--ndlocr-script` で公式Python版NDLOCR-Liteを縦書きページだけで試せる
-- Pythonを介さずONNX Runtimeで動作する内蔵版NDLOCR-Liteを追加した（`--ndlocr-model-dir`）。モデルは同梱せず、利用者が公式配布物のディレクトリを指定する
-- 外部バックエンドを実行するページを限定する `--backend-pages` と、実行時間の上限を指定する `--external-timeout`（既定120秒）を追加した
+- ONNX Runtimeで動作する内蔵版NDLOCR-Liteを追加した（`--ndlocr-model-dir`）。縦書きページの文字認識と読み順に使う。Pythonは不要で、モデルは同梱せず利用者が公式配布物のディレクトリを指定する
+- NDLOCR-Liteを実行するページを限定する `--backend-pages` を追加した
 - NDLOCR-Lite由来の実装に対する著作権表示として `THIRD-PARTY-NOTICES.md` を追加した
 
 ### 変更
 
-- 外部バックエンドが未導入、タイムアウト、異常終了、低信頼のいずれの場合も、RapidOCRと既存のレイアウト解析へ戻るようにした。外部バックエンドを指定しない既定の動作は0.4.0と同じである
+- NDLOCR-Liteのモデルが見つからない、推論に失敗した、低信頼のいずれの場合も、RapidOCRと既存のレイアウト解析へ戻るようにした。`--ndlocr-model-dir`を指定しない既定の動作は0.4.0と同じである
+- EpubFabricはPythonを使わない方針とし、Python必須だった外部バックエンド（PP-DocLayoutV2、公式Python版NDLOCR-Lite）とその呼び出し基盤を削除した。外部バックエンドは内蔵ONNX版のみになった
 - 内蔵版NDLOCR-Liteの読み順を、独自の帯分割から公式版と同じ再帰XY切断へ変更した。上下に分かれた記事帯をまたぐ列が本文の途中へ割り込む誤りを解消した
 - 内蔵版NDLOCR-Liteで、読み順の隣り合う行がほぼ同じ領域を占める場合に信頼度の低いほうを捨てるようにした。同じ見出しや署名が二重に出力される問題を解消した
 - ライセンスを GNU AGPLv3 から Apache License 2.0 へ変更した。著作権表示として `NOTICE` を追加した。0.4.0 までのリリースは AGPLv3 のままである

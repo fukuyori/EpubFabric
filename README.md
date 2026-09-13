@@ -186,6 +186,7 @@ Main options:
 | `--ollama-model <model>` | `gemma4:12b` | Model to use |
 | `--ollama-endpoint <url>` | `http://localhost:11434` | Ollama server |
 | `--ndlocr-model-dir <dir>` | Disabled | Recognize vertical pages with NDLOCR-Lite ([separate download](#ndlocr-lite-experimental-separate-download)) |
+| `--backend-pages <15,21>` | All pages | Restrict which pages run NDLOCR-Lite |
 
 ## NDLOCR-Lite (experimental, separate download)
 
@@ -223,19 +224,11 @@ Point `--ndlocr-model-dir` at the root of the clone; `src\model` and `src\config
 - If the models are missing, the names of the missing files are reported as a warning and RapidOCR is used instead. **The conversion does not fail**
 - `--backend-pages 15,21` restricts which pages run the backend
 
+EpubFabric does not use Python. The models run on ONNX Runtime.
+
 ### License
 
 NDLOCR-Lite is published by the National Diet Library under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). EpubFabric does not redistribute the models, so obtaining them and reviewing their terms is up to you. Attribution for the parts adapted into EpubFabric is in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
-
-### Options for comparison
-
-| Option | Purpose |
-|---|---|
-| `--ndlocr-script <ocr.py> --ndlocr-python <python>` | Run the official Python implementation (needs `pip install -r requirements.txt`) |
-| `--pp-layout-script <run_layout.py> --pp-layout-python <python>` | Use PP-DocLayoutV2 region reading order and figure candidates |
-| `--external-timeout <seconds>` | Time limit for an external backend (120 by default) |
-
-`--ndlocr-model-dir` and `--ndlocr-script` cannot be combined.
 
 ## GUI usage
 

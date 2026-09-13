@@ -184,6 +184,7 @@ dotnet run --project src\EpubFabric.Cli -- export book.efproj --format epub
 | `--ollama-model <model>` | `gemma4:12b` | 使用モデル |
 | `--ollama-endpoint <url>` | `http://localhost:11434` | Ollamaサーバー |
 | `--ndlocr-model-dir <dir>` | 無効 | 縦書きページを NDLOCR-Lite で認識する（[別途ダウンロード](#ndlocr-lite実験機能別途ダウンロード)） |
+| `--backend-pages <15,21>` | 全ページ | NDLOCR-Lite を実行するページを限定する |
 
 ## NDLOCR-Lite（実験機能・別途ダウンロード）
 
@@ -221,19 +222,11 @@ dotnet run --project src\EpubFabric.Cli -- convert input.pdf --layout reflow --n
 - モデルが見つからない場合は、不足しているファイル名を警告したうえで RapidOCR に戻ります。**変換は失敗しません**
 - `--backend-pages 15,21` で対象ページを限定できます
 
+EpubFabric は Python を使いません。モデルの実行は ONNX Runtime で行います。
+
 ### ライセンス
 
 NDLOCR-Lite は国立国会図書館が [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) で公開しています。EpubFabric はモデルを再配布しないため、取得と利用条件の確認は利用者が行ってください。EpubFabric へ取り込んだ実装の帰属表示は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) にあります。
-
-### 比較用のオプション
-
-| オプション | 用途 |
-|---|---|
-| `--ndlocr-script <ocr.py> --ndlocr-python <python>` | 公式Python版で実行する（`pip install -r requirements.txt` が必要） |
-| `--pp-layout-script <run_layout.py> --pp-layout-python <python>` | PP-DocLayoutV2 の領域読み順と図版候補を使う |
-| `--external-timeout <秒>` | 外部バックエンドの実行時間上限（既定120秒） |
-
-`--ndlocr-model-dir` と `--ndlocr-script` は同時に指定できません。
 
 ## 使い方（GUI）
 

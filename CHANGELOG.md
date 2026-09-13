@@ -9,14 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- Added experimental external backends for reflow analysis: `--pp-layout-script` applies PP-DocLayoutV2 region reading order and high-confidence figure candidates, and `--ndlocr-script` runs the official Python NDLOCR-Lite on vertical pages only
-- Added a built-in NDLOCR-Lite that runs on ONNX Runtime without Python (`--ndlocr-model-dir`); the models are not bundled, so the directory of the official distribution must be supplied
-- Added `--backend-pages` to restrict which pages run an external backend, and `--external-timeout` to cap its running time (120 seconds by default)
+- Added a built-in NDLOCR-Lite that runs on ONNX Runtime (`--ndlocr-model-dir`) for recognition and reading order on vertical pages. It needs no Python, and the models are not bundled, so the directory of the official distribution must be supplied
+- Added `--backend-pages` to restrict which pages run NDLOCR-Lite
 - Added `THIRD-PARTY-NOTICES.md` for the attribution required by the NDLOCR-Lite-derived implementation
 
 ### Changed
 
-- Fall back to RapidOCR and the existing layout analysis whenever an external backend is absent, times out, exits abnormally, or reports low confidence. Without an external backend the default behavior is unchanged from 0.4.0
+- Fall back to RapidOCR and the existing layout analysis whenever the NDLOCR-Lite models are missing, inference fails, or confidence is low. Without `--ndlocr-model-dir` the default behavior is unchanged from 0.4.0
+- Adopt a policy of not using Python, and remove the external backends that required it (PP-DocLayoutV2 and the official Python NDLOCR-Lite) together with the process plumbing they needed. The only external backend left is the bundled ONNX one
 - Replace the reading order of the built-in NDLOCR-Lite with the same recursive XY cut the official implementation uses, instead of the previous band splitting. This removes the cases where a column spanning two article bands was interleaved into the middle of a sentence
 - Drop the less confident of two adjacent lines in the built-in NDLOCR-Lite when they cover nearly the same area in reading order, which removes the duplicated headings and bylines
 - Change the license from GNU AGPLv3 to the Apache License 2.0 and add a `NOTICE` file for the copyright statement. Releases up to 0.4.0 remain AGPLv3
