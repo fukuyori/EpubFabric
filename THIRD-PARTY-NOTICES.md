@@ -10,6 +10,8 @@ Portions of the following files adapt work from
   postprocessing, and the recognition cascade
 - `src/EpubFabric.Pipeline/NdlOcrXyCutReadingOrder.cs` — the recursive XY-cut
   reading order of `reading_order/xy_cut/block_xy_cut.py`
+- `src/EpubFabric.Pipeline/NdlOcrAdjacentDuplicateFilter.cs` — the adjacent
+  duplicate removal of `reading_order/order/reorder.py`
 
 Copyright (c) 2023 National Diet Library, Japan.
 
@@ -19,7 +21,9 @@ The C# adaptation changes the runtime integration, image resizing, duplicate
 suppression, and error handling. In the reading order it keeps the upstream
 algorithm and replaces the NumPy array operations with scalar loops and an
 integral image, and it resolves the degenerate cases that NumPy would produce
-as infinity or NaN.
+as infinity or NaN. Upstream removes adjacent duplicates inside each TEXTBLOCK
+and among the children of PAGE; because EpubFabric keeps one flat list of lines
+per page, the adaptation applies the same rule across the page in reading order.
 
 NDLOCR-Lite model files are not included in this repository or its current
 distribution. Before distributing the models, their attribution and the

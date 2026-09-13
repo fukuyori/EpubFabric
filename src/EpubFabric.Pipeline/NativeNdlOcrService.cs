@@ -109,7 +109,7 @@ public sealed class NativeNdlOcrService : INdlOcrPageService
             throw new ExternalBackendException("内蔵ONNX版NDLOCR-Liteが有効な文字行を検出できませんでした。");
         }
 
-        var ordered = AssignReadingOrder(recognized);
+        var ordered = RemoveAdjacentDuplicates(AssignReadingOrder(recognized));
         var lines = ordered.Select((item, order) => new TextLine(
             new BoundingBox(
                 item.Detection.X1 / (double)image.Width,
@@ -305,6 +305,27 @@ public sealed class NativeNdlOcrService : INdlOcrPageService
             .ThenBy(item => item.Index)
             .Select(item => item.Line)
             .ToList();
+    }
+
+    /// <summary>
+    /// 読み順に並べたあと、直前の行とほぼ同じ領域を占める行を落とす。
+    /// 検出段階のIoU判定では入れ子の重複を取り逃がすため、公式版の<c>remove_dup</c>相当を加える。
+    /// </summary>
+    private static IReadOnlyList<RecognizedLine> RemoveAdjacentDuplicates(IReadOnlyList<RecognizedLine> ordered)
+    {
+        var candidates = ordered
+            .Select(line => new NdlOcrAdjacentDuplicateFilter.LineCandidate(
+                line.Detection.X1,
+                line.Detection.Y1,
+                line.Detection.X2,
+                line.Detection.Y2,
+                line.Detection.Confidence))
+            .ToList();
+
+        var kept = NdlOcrAdjacentDuplicateFilter.KeepIndices(candidates);
+        return kept.Count == ordered.Count
+            ? ordered
+            : kept.Select(index => ordered[index]).ToList();
     }
 
     private static List<Detection> RemoveDuplicateDetections(IReadOnlyList<Detection> detections)
