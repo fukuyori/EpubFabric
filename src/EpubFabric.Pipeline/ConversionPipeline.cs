@@ -35,13 +35,8 @@ public sealed class ConversionPipeline
         var ocrPreprocessor = new OcrImagePreprocessor();
         var inkDensityMeasurer = new LineInkDensityMeasurer();
         var pageEnhancer = options.EnhancePages ? new PageImageEnhancer() : null;
-        using INdlOcrPageService? ndlOcrService = options.NativeNdlOcr is { } nativeNdlOcrOptions
+        using var ndlOcrService = options.NativeNdlOcr is { } nativeNdlOcrOptions
             ? new NativeNdlOcrService(nativeNdlOcrOptions)
-            : options.NdlOcr is { } ndlOcrOptions
-                ? new NdlOcrService(ndlOcrOptions)
-                : null;
-        var ppDocLayoutService = options.PpDocLayout is { } ppDocLayoutOptions
-            ? new PpDocLayoutService(ppDocLayoutOptions)
             : null;
         var info = pdfService.GetInfo(options.InputPath);
 
@@ -181,24 +176,6 @@ public sealed class ConversionPipeline
                     }
                 }
 
-                IReadOnlyList<PpDocLayoutRegion> externalLayoutRegions = [];
-                if (!options.PreserveAllTextLines
-                    && ppDocLayoutService is not null
-                    && ShouldRunExternalBackend(pageNumber))
-                {
-                    try
-                    {
-                        externalLayoutRegions = await ppDocLayoutService.AnalyzePageAsync(
-                            displayImagePath,
-                            Path.Combine(workDirectory, "pp-doc-layout", $"page-{pageNumber:0000}"),
-                            cancellationToken);
-                        Report(pageNumber, $"  PP-DocLayoutV2から{externalLayoutRegions.Count}件の領域候補を取得しました。");
-                    }
-                    catch (ExternalBackendException ex)
-                    {
-                        Report(pageNumber, $"警告: PP-DocLayoutV2を利用できません（{ex.Message}）。既存の図版検出で続けます。");
-                    }
-                }
 
                 var pageInfo = info.Pages[i];
                 var pageBlocks = new List<PageBlock>();
@@ -216,11 +193,10 @@ public sealed class ConversionPipeline
                     if (assessment.IsUsable)
                     {
                         pageLayoutProfile = ResolveLayoutProfile(textLines);
-                        textLines = AssignExternalReadingOrder(pageNumber, textLines, pageLayoutProfile, externalLayoutRegions);
                         pageWritingMode = pageLayoutProfile.WritingMode;
                         detectedPageModes.Add(pageWritingMode);
                         ReportLayout(pageNumber, pageLayoutProfile);
-                        pageBlocks = BuildTextBlocks(pageNumber, displayImagePath, textLines, pageLayoutProfile, externalLayoutRegions);
+                        pageBlocks = BuildTextBlocks(pageNumber, displayImagePath, textLines, pageLayoutProfile);
                     }
                     else
                     {
@@ -276,7 +252,6 @@ public sealed class ConversionPipeline
                         var rapidLayoutProfile = ResolveLayoutProfile(ocrLines);
                         if (!options.PreserveAllTextLines
                             && ndlOcrService is not null
-                            && (options.NativeNdlOcr is not null || options.NdlOcr is not null)
                             && ShouldRunExternalBackend(pageNumber)
                             && rapidLayoutProfile.WritingMode == WritingMode.Vertical)
                         {
@@ -286,10 +261,8 @@ public sealed class ConversionPipeline
                                     displayImagePath,
                                     Path.Combine(workDirectory, "ndlocr", $"page-{pageNumber:0000}"),
                                     cancellationToken);
-                                var minimumAverageConfidence = options.NativeNdlOcr?.MinimumAverageConfidence
-                                    ?? options.NdlOcr!.MinimumAverageConfidence;
-                                var minimumVerticalLineShare = options.NativeNdlOcr?.MinimumVerticalLineShare
-                                    ?? options.NdlOcr!.MinimumVerticalLineShare;
+                                var minimumAverageConfidence = options.NativeNdlOcr!.MinimumAverageConfidence;
+                                var minimumVerticalLineShare = options.NativeNdlOcr.MinimumVerticalLineShare;
                                 if (ndlResult.AverageConfidence >= minimumAverageConfidence
                                     && ndlResult.VerticalLineShare >= minimumVerticalLineShare)
                                 {
@@ -314,11 +287,10 @@ public sealed class ConversionPipeline
                         }
 
                         pageLayoutProfile = ResolveLayoutProfile(ocrLines);
-                        ocrLines = AssignExternalReadingOrder(pageNumber, ocrLines, pageLayoutProfile, externalLayoutRegions);
                         pageWritingMode = pageLayoutProfile.WritingMode;
                         detectedPageModes.Add(pageWritingMode);
                         ReportLayout(pageNumber, pageLayoutProfile);
-                        pageBlocks = BuildTextBlocks(pageNumber, displayImagePath, ocrLines, pageLayoutProfile, externalLayoutRegions);
+                        pageBlocks = BuildTextBlocks(pageNumber, displayImagePath, ocrLines, pageLayoutProfile);
                     }
                     catch (Exception ex) when (ex is OcrModelDownloadException or InvalidOperationException)
                     {
@@ -513,76 +485,28 @@ public sealed class ConversionPipeline
         bool ShouldRunExternalBackend(int pageNumber) =>
             options.ExternalBackendPages is null || options.ExternalBackendPages.Contains(pageNumber);
 
-        IReadOnlyList<TextLine> AssignExternalReadingOrder(
-            int pageNumber,
-            IReadOnlyList<TextLine> lines,
-            PageLayoutProfile layoutProfile,
-            IReadOnlyList<PpDocLayoutRegion> externalLayoutRegions)
-        {
-            if (options.PpDocLayout is not { } ppOptions
-                || externalLayoutRegions.Count == 0
-                || lines.Any(line => line.SourceReadingOrder is not null))
-            {
-                return lines;
-            }
-
-            var assignment = PpDocLayoutReadingOrderAssigner.Assign(
-                lines,
-                externalLayoutRegions,
-                layoutProfile.WritingMode,
-                ppOptions.MinimumTextLineCoverage);
-            if (assignment.Adopted)
-            {
-                Report(
-                    pageNumber,
-                    $"  PP-DocLayoutV2の領域読み順を採用しました"
-                    + $"（文字行{assignment.AssignedLineCount}/{lines.Count}、{assignment.Coverage:P0}）。");
-            }
-            else
-            {
-                Report(
-                    pageNumber,
-                    $"  PP-DocLayoutV2の領域読み順を採用しません"
-                    + $"（文字行{assignment.AssignedLineCount}/{lines.Count}、{assignment.Coverage:P0}）。");
-            }
-
-            return assignment.Lines;
-        }
-
         // 固定レイアウトでは全テキスト行を座標付きのまま保持する。
         // リフロー型ではレイアウト解析と段落統合を適用し、図ブロックの画像を切り出す。
         List<PageBlock> BuildTextBlocks(
             int pageNumber,
             string imagePath,
             IReadOnlyList<TextLine> lines,
-            PageLayoutProfile layoutProfile,
-            IReadOnlyList<PpDocLayoutRegion> externalLayoutRegions) =>
+            PageLayoutProfile layoutProfile) =>
             options.PreserveAllTextLines
                 ? textLayerBlockBuilder.Build(pageNumber, lines, layoutProfile.WritingMode, layoutProfile)
-                : AnalyzeLayout(pageNumber, imagePath, lines, layoutProfile, externalLayoutRegions);
+                : AnalyzeLayout(pageNumber, imagePath, lines, layoutProfile);
 
         List<PageBlock> AnalyzeLayout(
             int pageNumber,
             string imagePath,
             IReadOnlyList<TextLine> lines,
-            PageLayoutProfile layoutProfile,
-            IReadOnlyList<PpDocLayoutRegion> externalLayoutRegions)
+            PageLayoutProfile layoutProfile)
         {
             // 太字見出し検出用に行のインク密度を測る（高さが本文と同じゴシック見出し対策）。
             lines = inkDensityMeasurer.Measure(imagePath, lines);
 
             var textBounds = lines.Select(l => l.Bounds).ToList();
             var regions = regionDetector.DetectRegions(imagePath, textBounds);
-            var externalFigureCount = options.PpDocLayout is { } ppOptions
-                ? ExternalFigureRegionMerger.Merge(
-                    regions,
-                    externalLayoutRegions,
-                    ppOptions.MinimumStandaloneImageConfidence)
-                : 0;
-            if (externalFigureCount > 0)
-            {
-                Report(pageNumber, $"  PP-DocLayoutV2の高信頼図版候補{externalFigureCount}件を追加しました。");
-            }
             var blocks = paragraphMerger.Merge(
                 layoutAnalyzer.AnalyzePage(
                     pageNumber,

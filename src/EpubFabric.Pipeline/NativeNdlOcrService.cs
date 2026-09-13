@@ -13,11 +13,24 @@ namespace EpubFabric.Pipeline;
 // and error handling for EpubFabric. The reading order follows the upstream
 // recursive XY cut; see NdlOcrXyCutReadingOrder.
 
+/// <summary>1ページ分の認識結果。</summary>
+public sealed record NdlOcrPageResult(
+    IReadOnlyList<TextLine> Lines,
+    int ImageWidth,
+    int ImageHeight)
+{
+    public double AverageConfidence => Lines.Count == 0 ? 0 : Lines.Average(line => line.Confidence);
+
+    public double VerticalLineShare => Lines.Count == 0
+        ? 0
+        : (double)Lines.Count(line => line.DetectedWritingMode == WritingMode.Vertical) / Lines.Count;
+}
+
 /// <summary>
 /// NDLOCR-LiteのDEIM検出器とPARSeq認識器をONNX Runtimeで直接実行する。
 /// モデルの再配布方法を確定するまでは、公式配布物のディレクトリを明示指定して使用する。
 /// </summary>
-public sealed class NativeNdlOcrService : INdlOcrPageService
+public sealed class NativeNdlOcrService : IDisposable
 {
     private const string CharsetFileName = "NDLmoji.yaml";
     private const float DetectorConfidenceThreshold = 0.25f;

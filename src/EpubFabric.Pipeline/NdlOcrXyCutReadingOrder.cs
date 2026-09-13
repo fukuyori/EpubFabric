@@ -16,8 +16,7 @@ namespace EpubFabric.Pipeline;
 /// <remarks>
 /// 公式版は<c>eval_xml</c>で<c>solve</c>の順位を<c>ORDER</c>へ書き、その後の
 /// <c>sort_lines</c>と<c>smooth_order</c>は要素の並びだけを変えて<c>ORDER</c>の値を
-/// 書き換えない。EpubFabricの<see cref="NdlOcrXmlAdapter"/>は<c>ORDER</c>で並べ替えるため、
-/// 公式版と同じ順序を得るにはこの<c>solve</c>相当だけを移植すればよい。
+/// 書き換えない。公式版と同じ順序を得るには、この<c>solve</c>相当だけを移植すればよい。
 /// </remarks>
 public static class NdlOcrXyCutReadingOrder
 {
