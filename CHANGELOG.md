@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-13
+
 ### Added
 
 - Added a built-in NDLOCR-Lite that runs on ONNX Runtime (`--ndlocr-model-dir`) for recognition and reading order on vertical pages. It needs no Python, and the models are not bundled, so the directory of the official distribution must be supplied
@@ -165,7 +167,8 @@ Initial release, providing a complete workflow for converting PDFs—both scanne
 - Windows GUI (WinUI 3) with conversion and three-pane proofreading screens
 - Distribution scripts and an Inno Setup installer
 
-[Unreleased]: https://github.com/fukuyori/EpubFabric/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/fukuyori/EpubFabric/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/fukuyori/EpubFabric/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/fukuyori/EpubFabric/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/fukuyori/EpubFabric/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/fukuyori/EpubFabric/compare/v0.2.3...v0.2.4

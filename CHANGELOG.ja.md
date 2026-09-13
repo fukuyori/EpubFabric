@@ -7,6 +7,8 @@
 
 ## [未リリース]
 
+## [0.4.1] - 2026-09-13
+
 ### 追加
 
 - ONNX Runtimeで動作する内蔵版NDLOCR-Liteを追加した（`--ndlocr-model-dir`）。縦書きページの文字認識と読み順に使う。Pythonは不要で、モデルは同梱せず利用者が公式配布物のディレクトリを指定する
@@ -165,7 +167,8 @@
 - Windows GUI（WinUI 3）: 変換画面と 3 ペインの校正画面
 - 配布用スクリプトと Inno Setup インストーラー
 
-[未リリース]: https://github.com/fukuyori/EpubFabric/compare/v0.4.0...HEAD
+[未リリース]: https://github.com/fukuyori/EpubFabric/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/fukuyori/EpubFabric/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/fukuyori/EpubFabric/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/fukuyori/EpubFabric/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/fukuyori/EpubFabric/compare/v0.2.3...v0.2.4
