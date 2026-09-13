@@ -185,6 +185,57 @@ Main options:
 | `--ollama` | Disabled | Semantic classification and OCR correction with Ollama |
 | `--ollama-model <model>` | `gemma4:12b` | Model to use |
 | `--ollama-endpoint <url>` | `http://localhost:11434` | Ollama server |
+| `--ndlocr-model-dir <dir>` | Disabled | Recognize vertical pages with NDLOCR-Lite ([separate download](#ndlocr-lite-experimental-separate-download)) |
+
+## NDLOCR-Lite (experimental, separate download)
+
+Vertical pages can be recognized and ordered with the National Diet Library's [NDLOCR-Lite](https://github.com/ndl-lab/ndlocr-lite) instead of RapidOCR. Over 30 vertical pages of a geography magazine it improved both the character error rate and the reading order.
+
+**The models are not bundled.** Without the option EpubFabric runs on RapidOCR alone, exactly as before.
+
+### Setup
+
+```powershell
+git clone https://github.com/ndl-lab/ndlocr-lite
+```
+
+Neither Python nor `pip install` is required. EpubFabric reads only these five files, about 150 MiB in total.
+
+| File | Location in the clone |
+|---|---|
+| `deim-s-1024x1024.onnx` | `src/model/` |
+| `parseq-ndl-24x256-30-tiny-189epoch-tegaki3-r8data-202604.onnx` | `src/model/` |
+| `parseq-ndl-24x384-50-tiny-300epoch-tegaki3-r8data-202604.onnx` | `src/model/` |
+| `parseq-ndl-24x768-100-tiny-153epoch-tegaki3-r8data-202604.onnx` | `src/model/` |
+| `NDLmoji.yaml` | `src/config/` |
+
+### Usage
+
+```powershell
+dotnet run --project src\EpubFabric.Cli -- convert input.pdf --layout reflow --ndlocr-model-dir <clone directory>
+```
+
+Point `--ndlocr-model-dir` at the root of the clone; `src\model` and `src\config` are located automatically. A directory holding the five files together also works.
+
+- Only reflow output (`--layout reflow`) uses it
+- It runs only on pages RapidOCR detected as vertical
+- Pages below an average confidence of 0.85, or with fewer than 60% vertical lines, keep the RapidOCR result
+- If the models are missing, the names of the missing files are reported as a warning and RapidOCR is used instead. **The conversion does not fail**
+- `--backend-pages 15,21` restricts which pages run the backend
+
+### License
+
+NDLOCR-Lite is published by the National Diet Library under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). EpubFabric does not redistribute the models, so obtaining them and reviewing their terms is up to you. Attribution for the parts adapted into EpubFabric is in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+### Options for comparison
+
+| Option | Purpose |
+|---|---|
+| `--ndlocr-script <ocr.py> --ndlocr-python <python>` | Run the official Python implementation (needs `pip install -r requirements.txt`) |
+| `--pp-layout-script <run_layout.py> --pp-layout-python <python>` | Use PP-DocLayoutV2 region reading order and figure candidates |
+| `--external-timeout <seconds>` | Time limit for an external backend (120 by default) |
+
+`--ndlocr-model-dir` and `--ndlocr-script` cannot be combined.
 
 ## GUI usage
 
@@ -245,9 +296,10 @@ docs/
 
 ## License and acknowledgments
 
-This project is released under the [GNU AGPLv3](LICENSE).
+This project is released under the [Apache License 2.0](LICENSE). Releases up to 0.4.0 were AGPLv3. The copyright statement is in [NOTICE](NOTICE), and attribution for third-party components is in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 - OCR models: [RapidOCR](https://github.com/RapidAI/RapidOCR) (PP-OCRv6) / [RapidOcrNet](https://github.com/BobLd/RapidOcrNet)
 - PDF rendering: [Docnet](https://github.com/GowenGit/docnet) (PDFium)
 - Image processing: [OpenCvSharp](https://github.com/shimat/opencvsharp) / [SkiaSharp](https://github.com/mono/SkiaSharp)
+- Vertical-text OCR (optional, separate download): [NDLOCR-Lite](https://github.com/ndl-lab/ndlocr-lite) (National Diet Library, CC BY 4.0)
 - The page-enhancement method used by `--enhance` is an independent OpenCV implementation inspired by the paper-color statistical correction technique in Daiyuu Nobori's [DN_SuperBook_PDF_Converter](https://github.com/dnobori/DN_SuperBook_PDF_Converter) (AGPLv3)

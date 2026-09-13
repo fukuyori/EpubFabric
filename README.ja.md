@@ -183,6 +183,57 @@ dotnet run --project src\EpubFabric.Cli -- export book.efproj --format epub
 | `--ollama` | 無効 | Ollamaによる意味分類とOCR校正 |
 | `--ollama-model <model>` | `gemma4:12b` | 使用モデル |
 | `--ollama-endpoint <url>` | `http://localhost:11434` | Ollamaサーバー |
+| `--ndlocr-model-dir <dir>` | 無効 | 縦書きページを NDLOCR-Lite で認識する（[別途ダウンロード](#ndlocr-lite実験機能別途ダウンロード)） |
+
+## NDLOCR-Lite（実験機能・別途ダウンロード）
+
+縦書きページの文字認識と読み順を、国立国会図書館の [NDLOCR-Lite](https://github.com/ndl-lab/ndlocr-lite) に置き換えて試せます。地理誌の縦書き30ページでの検証では、RapidOCR に対して文字誤り率と読み順が改善しました。
+
+**モデルは同梱していません。** 指定しなければ従来どおり RapidOCR だけで動きます。
+
+### 準備
+
+```powershell
+git clone https://github.com/ndl-lab/ndlocr-lite
+```
+
+Python のインストールや `pip install` は不要です。EpubFabric が使うのは次の5ファイルだけで、合計約150 MiB です。
+
+| ファイル | クローン内の場所 |
+|---|---|
+| `deim-s-1024x1024.onnx` | `src/model/` |
+| `parseq-ndl-24x256-30-tiny-189epoch-tegaki3-r8data-202604.onnx` | `src/model/` |
+| `parseq-ndl-24x384-50-tiny-300epoch-tegaki3-r8data-202604.onnx` | `src/model/` |
+| `parseq-ndl-24x768-100-tiny-153epoch-tegaki3-r8data-202604.onnx` | `src/model/` |
+| `NDLmoji.yaml` | `src/config/` |
+
+### 使い方
+
+```powershell
+dotnet run --project src\EpubFabric.Cli -- convert input.pdf --layout reflow --ndlocr-model-dir <クローン先>
+```
+
+`--ndlocr-model-dir` には、クローンしたリポジトリの直下を指定します（`src\model` と `src\config` を自動で辿ります）。上記5ファイルを1か所へ集めたフォルダーを指定しても動きます。
+
+- リフロー型（`--layout reflow`）でだけ動作します
+- RapidOCR が縦書きと判定したページでだけ実行します
+- 平均信頼度が0.85未満、または縦書き行が60%未満のページは採用せず、RapidOCR の結果に戻します
+- モデルが見つからない場合は、不足しているファイル名を警告したうえで RapidOCR に戻ります。**変換は失敗しません**
+- `--backend-pages 15,21` で対象ページを限定できます
+
+### ライセンス
+
+NDLOCR-Lite は国立国会図書館が [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) で公開しています。EpubFabric はモデルを再配布しないため、取得と利用条件の確認は利用者が行ってください。EpubFabric へ取り込んだ実装の帰属表示は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) にあります。
+
+### 比較用のオプション
+
+| オプション | 用途 |
+|---|---|
+| `--ndlocr-script <ocr.py> --ndlocr-python <python>` | 公式Python版で実行する（`pip install -r requirements.txt` が必要） |
+| `--pp-layout-script <run_layout.py> --pp-layout-python <python>` | PP-DocLayoutV2 の領域読み順と図版候補を使う |
+| `--external-timeout <秒>` | 外部バックエンドの実行時間上限（既定120秒） |
+
+`--ndlocr-model-dir` と `--ndlocr-script` は同時に指定できません。
 
 ## 使い方（GUI）
 
@@ -243,9 +294,10 @@ docs/
 
 ## ライセンス・謝辞
 
-本プロジェクトは [GNU AGPLv3](LICENSE) で公開しています。
+本プロジェクトは [Apache License 2.0](LICENSE) で公開しています（0.4.0 までは AGPLv3 でした）。著作権表示は [NOTICE](NOTICE)、第三者コンポーネントの帰属表示は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) にあります。
 
 - OCR モデル: [RapidOCR](https://github.com/RapidAI/RapidOCR)（PP-OCRv6）/ [RapidOcrNet](https://github.com/BobLd/RapidOcrNet)
 - PDF レンダリング: [Docnet](https://github.com/GowenGit/docnet)（PDFium）
 - 画像処理: [OpenCvSharp](https://github.com/shimat/opencvsharp) / [SkiaSharp](https://github.com/mono/SkiaSharp)
+- 縦書きOCR（任意・別途ダウンロード）: [NDLOCR-Lite](https://github.com/ndl-lab/ndlocr-lite)（国立国会図書館、CC BY 4.0）
 - 紙面高品質化（`--enhance`）の手法は、登 大遊氏の [DN_SuperBook_PDF_Converter](https://github.com/dnobori/DN_SuperBook_PDF_Converter)（AGPLv3）の紙色統計補正のアイデアを参考に、OpenCV で独自実装したものです

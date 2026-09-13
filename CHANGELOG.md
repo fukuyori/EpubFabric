@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Fall back to RapidOCR and the existing layout analysis whenever an external backend is absent, times out, exits abnormally, or reports low confidence. Without an external backend the default behavior is unchanged from 0.4.0
 - Replace the reading order of the built-in NDLOCR-Lite with the same recursive XY cut the official implementation uses, instead of the previous band splitting. This removes the cases where a column spanning two article bands was interleaved into the middle of a sentence
 - Drop the less confident of two adjacent lines in the built-in NDLOCR-Lite when they cover nearly the same area in reading order, which removes the duplicated headings and bylines
+- Change the license from GNU AGPLv3 to the Apache License 2.0 and add a `NOTICE` file for the copyright statement. Releases up to 0.4.0 remain AGPLv3
+- Document in the README how to obtain and use the NDLOCR-Lite models. They are not bundled, and EpubFabric runs on RapidOCR when they are absent
+- List the third-party components carried in a distribution in `THIRD-PARTY-NOTICES.md`, and install `LICENSE`, `NOTICE`, and `THIRD-PARTY-NOTICES.md` alongside the application
+- Exclude `opencv_videoio_ffmpeg*.dll` (about 28 MiB) from build output and distributions. EpubFabric never uses OpenCV video input or output, so there is no reason to carry FFmpeg
 
 ## [0.4.0] - 2026-09-07
 
