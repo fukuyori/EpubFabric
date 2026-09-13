@@ -19,6 +19,12 @@ public sealed class ParagraphMerger
     /// <summary>行高さの比がこれを超える行同士は別ブロック（フォントサイズが異なる）とみなす。</summary>
     private const double MaxHeightRatio = 1.6;
 
+    /// <summary>
+    /// 段や帯が変わったとみなす、行の積み上げ方向の戻り幅（行高さ比）。
+    /// 横に並んでいるだけの段は行1つ分しか戻らないため、それより大きくとる。
+    /// </summary>
+    private const double MinStackingResetRatio = 1.5;
+
     /// <summary>本文行の何倍の高さならドロップキャップ（段落頭の飾り文字）とみなすか。</summary>
     private const double DropCapHeightRatio = 1.5;
 
@@ -193,17 +199,37 @@ public sealed class ParagraphMerger
             return false;
         }
 
-        // 別の段（横に並んでいる）や、フォントサイズが違う行は統合しない。
-        var overlapX = Math.Min(lastBounds.X + lastBounds.Width, nextBounds.X + nextBounds.Width)
-            - Math.Max(lastBounds.X, nextBounds.X);
-        var narrower = Math.Min(lastBounds.Width, nextBounds.Width);
-        if (narrower <= 0 || overlapX / narrower < 0.5)
+        // フォントサイズが違う行は、座標が続いていても別のブロックとして扱う。
+        var heightRatio = Math.Max(lastBounds.Height, nextBounds.Height) / lineHeight;
+        if (heightRatio > MaxHeightRatio)
         {
             return false;
         }
 
-        var heightRatio = Math.Max(lastBounds.Height, nextBounds.Height) / lineHeight;
-        if (heightRatio > MaxHeightRatio)
+        if (IsAdjacentInReadingOrder(lastBounds, nextBounds, lineHeight))
+        {
+            return true;
+        }
+
+        // 図版や囲み記事が挟まると本文が紙面上の帯へ分かれ、次の段は行の積み上げ方向で
+        // 前の段よりかなり手前へ戻る。座標だけでは続きだと判定できないため、
+        // 戻り幅が行の高さを明確に超えている場合に限り、語の途中で切れた本文を連結する。
+        // 単に横へ並んでいるだけの段は戻り幅が行1つ分にとどまるので、ここで分かれる。
+        var stackingReset = nextBounds.Y - (lastBounds.Y + lastBounds.Height);
+        return stackingReset < -MinStackingResetRatio * lineHeight
+            && ContinuesMidWord(paragraph, next);
+    }
+
+    /// <summary>
+    /// 読み方向で次の行として素直に続いているか。段をまたぐ場合はここでは判定しない。
+    /// </summary>
+    private static bool IsAdjacentInReadingOrder(BoundingBox lastBounds, BoundingBox nextBounds, double lineHeight)
+    {
+        // 別の段（横に並んでいる）は統合しない。
+        var overlapX = Math.Min(lastBounds.X + lastBounds.Width, nextBounds.X + nextBounds.Width)
+            - Math.Max(lastBounds.X, nextBounds.X);
+        var narrower = Math.Min(lastBounds.Width, nextBounds.Width);
+        if (narrower <= 0 || overlapX / narrower < 0.5)
         {
             return false;
         }
@@ -215,12 +241,32 @@ public sealed class ParagraphMerger
             return false;
         }
 
-        if (nextBounds.X - lastBounds.X > IndentRatio * nextBounds.Height)
+        return nextBounds.X - lastBounds.X <= IndentRatio * nextBounds.Height;
+    }
+
+    /// <summary>
+    /// 直前の段落が語の途中で終わり、次のブロックが語の続きで始まっているか。
+    /// </summary>
+    /// <remarks>
+    /// 句点や閉じ括弧で終わっていれば段落は完結しているとみなして連結しない。
+    /// 数字や記号で終わる・始まるものは表の升目や凡例であることが多いため除く。
+    /// 本文どうしに限り、見出しや囲み記事はこの経路では連結しない。
+    /// </remarks>
+    private static bool ContinuesMidWord(PageBlock paragraph, PageBlock next)
+    {
+        if (paragraph.Type != BlockType.Body || next.Type != BlockType.Body)
         {
             return false;
         }
 
-        return true;
+        var previousText = paragraph.OcrText.AsSpan().TrimEnd();
+        var nextText = next.OcrText.AsSpan().TrimStart();
+        if (previousText.Length == 0 || nextText.Length == 0)
+        {
+            return false;
+        }
+
+        return char.IsLetter(previousText[^1]) && char.IsLetter(nextText[0]);
     }
 
     private static BoundingBox ReadingBounds(PageBlock block, WritingMode writingMode) =>

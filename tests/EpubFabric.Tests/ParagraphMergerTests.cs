@@ -6,6 +6,115 @@ namespace EpubFabric.Tests;
 public class ParagraphMergerTests
 {
     [Fact]
+    public void Merge_JoinsVerticalBodyAcrossBandsWhenTheWordIsCut()
+    {
+        // 縦書きページで図版が挟まり、本文が上下の帯へ分かれた形。
+        // 上の帯の左端の列から、下の帯の右端の列へ語の途中で続いている。
+        var blocks = new List<PageBlock>
+        {
+            VerticalColumn("b1", column: 0.20, top: 0.08, bottom: 0.40, text: "周囲のまなざしによっ", readingOrder: 0),
+            VerticalColumn("b2", column: 0.80, top: 0.55, bottom: 0.92, text: "て深まる。", readingOrder: 1),
+        };
+
+        var merged = new ParagraphMerger().Merge(blocks, WritingMode.Vertical);
+
+        Assert.Equal("周囲のまなざしによって深まる。", Assert.Single(merged).OcrText);
+    }
+
+    [Fact]
+    public void Merge_KeepsVerticalBandsApartWhenTheSentenceIsComplete()
+    {
+        var blocks = new List<PageBlock>
+        {
+            VerticalColumn("b1", column: 0.20, top: 0.08, bottom: 0.40, text: "前の段はここで終わる。", readingOrder: 0),
+            VerticalColumn("b2", column: 0.80, top: 0.55, bottom: 0.92, text: "次の段は別の話題である。", readingOrder: 1),
+        };
+
+        var merged = new ParagraphMerger().Merge(blocks, WritingMode.Vertical);
+
+        Assert.Equal(2, merged.Count);
+    }
+
+    [Fact]
+    public void Merge_KeepsTableLikeCellsApartAcrossBands()
+    {
+        // 表の升目は数字で終わる・始まるため、帯をまたいでも連結しない。
+        var blocks = new List<PageBlock>
+        {
+            VerticalColumn("b1", column: 0.20, top: 0.08, bottom: 0.40, text: "世界の国々について", readingOrder: 0),
+            VerticalColumn("b2", column: 0.80, top: 0.55, bottom: 0.92, text: "52.6", readingOrder: 1),
+        };
+
+        var merged = new ParagraphMerger().Merge(blocks, WritingMode.Vertical);
+
+        Assert.Equal(2, merged.Count);
+    }
+
+    [Fact]
+    public void Merge_DoesNotJoinAsideAcrossBands()
+    {
+        // 本文どうしに限る。囲み記事は語の途中で切れていても連結しない。
+        var blocks = new List<PageBlock>
+        {
+            VerticalColumn("b1", column: 0.20, top: 0.08, bottom: 0.40, text: "囲み記事の途中で", type: BlockType.Aside, readingOrder: 0),
+            VerticalColumn("b2", column: 0.80, top: 0.55, bottom: 0.92, text: "切れている", type: BlockType.Aside, readingOrder: 1),
+        };
+
+        var merged = new ParagraphMerger().Merge(blocks, WritingMode.Vertical);
+
+        Assert.Equal(2, merged.Count);
+    }
+
+    [Fact]
+    public void Merge_JoinsHorizontalColumnsWhenTheWordIsCut()
+    {
+        // 横書き2段組みで、左段の最終行から右段の先頭行へ語の途中で続く形。
+        var blocks = new List<PageBlock>
+        {
+            Line("b1", 0.88, "これらは制度", x: 0.06, width: 0.40, readingOrder: 0),
+            Line("b2", 0.12, "設計や実施方法によって", x: 0.54, width: 0.40, readingOrder: 1),
+        };
+
+        var merged = new ParagraphMerger().Merge(blocks);
+
+        Assert.Equal("これらは制度設計や実施方法によって", Assert.Single(merged).OcrText);
+    }
+
+    [Fact]
+    public void Merge_KeepsSideBySideColumnsApartAtTheSameHeight()
+    {
+        // 同じ高さで横に並ぶ段は、語の途中に見えても連結しない。
+        var blocks = new List<PageBlock>
+        {
+            Line("b1", 0.14, "左段の本文", x: 0.05, width: 0.40, readingOrder: 0),
+            Line("b2", 0.14, "右段の本文", x: 0.55, width: 0.40, readingOrder: 1),
+        };
+
+        var merged = new ParagraphMerger().Merge(blocks);
+
+        Assert.Equal(2, merged.Count);
+    }
+
+    /// <summary>縦書きの1列。<paramref name="column"/>が大きいほど紙面の右側に置く。</summary>
+    private static PageBlock VerticalColumn(
+        string id,
+        double column,
+        double top,
+        double bottom,
+        string text,
+        BlockType type = BlockType.Body,
+        int readingOrder = 0) => new()
+        {
+            Id = id,
+            PageNumber = 1,
+            Bounds = new BoundingBox(column, top, 0.03, bottom - top),
+            Type = type,
+            OcrText = text,
+            OcrConfidence = 0.95,
+            ReadingOrder = readingOrder,
+        };
+
+    [Fact]
     public void Merge_JoinsDigitsSplitAcrossAdjacentLinesWithoutSpace()
     {
         var blocks = new List<PageBlock>
