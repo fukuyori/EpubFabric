@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Added experimental external backends for reflow analysis: `--pp-layout-script` applies PP-DocLayoutV2 region reading order and high-confidence figure candidates, and `--ndlocr-script` runs the official Python NDLOCR-Lite on vertical pages only
+- Added a built-in NDLOCR-Lite that runs on ONNX Runtime without Python (`--ndlocr-model-dir`); the models are not bundled, so the directory of the official distribution must be supplied
+- Added `--backend-pages` to restrict which pages run an external backend, and `--external-timeout` to cap its running time (120 seconds by default)
+- Added `THIRD-PARTY-NOTICES.md` for the attribution required by the NDLOCR-Lite-derived implementation
+
+### Changed
+
+- Fall back to RapidOCR and the existing layout analysis whenever an external backend is absent, times out, exits abnormally, or reports low confidence. Without an external backend the default behavior is unchanged from 0.4.0
+
 ## [0.4.0] - 2026-09-07
 
 ### Added
