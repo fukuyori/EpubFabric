@@ -21,11 +21,22 @@ public sealed record OllamaPipelineOptions(string Endpoint, string Model);
 /// <summary>固定レイアウトEPUBへ収録するページ画像の再圧縮設定。</summary>
 public sealed record PageImageEncodingOptions(int JpegQuality = 85, int MaxSideLength = 2200);
 
-/// <summary>ONNX RuntimeでNDLOCR-Liteを実行する実験設定。Pythonは使用しない。</summary>
+/// <summary>
+/// ONNX RuntimeでNDLOCR-Liteを実行する設定。Pythonは使用しない。
+/// </summary>
+/// <param name="ModelDirectory">
+/// モデルのディレクトリ。nullなら配布物に同梱した <c>models\ndlocr</c> を探す。
+/// </param>
+/// <param name="MinimumAverageConfidence">ページの検出信頼度の平均がこれ未満ならRapidOCRへ戻す。</param>
+/// <param name="MinimumVerticalLineShare">縦書きページで、縦長の行の割合がこれ未満ならRapidOCRへ戻す。</param>
+/// <param name="UseForHorizontalPages">
+/// 横書きのページにもNDLOCR-Liteの結果を使う（評価用の試験設定）。falseなら横書きはRapidOCRで読む。
+/// </param>
 public sealed record NativeNdlOcrPipelineOptions(
-    string ModelDirectory,
+    string? ModelDirectory = null,
     double MinimumAverageConfidence = 0.85,
-    double MinimumVerticalLineShare = 0.60);
+    double MinimumVerticalLineShare = 0.60,
+    bool UseForHorizontalPages = false);
 
 /// <summary>PDF→プロジェクト構築の設定一式。CLIとGUIの両方から使う。</summary>
 public sealed record ConversionOptions
@@ -60,10 +71,13 @@ public sealed record ConversionOptions
 
     public OllamaPipelineOptions? Ollama { get; init; }
 
-    /// <summary>縦書きページでだけ試す内蔵ONNX版NDLOCR-Lite設定。nullなら現在のRapidOCRだけを使う。</summary>
-    public NativeNdlOcrPipelineOptions? NativeNdlOcr { get; init; }
+    /// <summary>
+    /// 内蔵ONNX版NDLOCR-Liteの設定。OCRが必要なページでは先にNDLOCR-Liteで読み、
+    /// 縦書きと判定したページはその結果を使う。nullならRapidOCRだけを使う。
+    /// </summary>
+    public NativeNdlOcrPipelineOptions? NativeNdlOcr { get; init; } = new();
 
-    /// <summary>外部バックエンドを実行するページ番号。nullなら対象となる全ページ。</summary>
+    /// <summary>NDLOCR-Liteを実行するページ番号。nullなら対象となる全ページ。</summary>
     public IReadOnlySet<int>? ExternalBackendPages { get; init; }
 }
 

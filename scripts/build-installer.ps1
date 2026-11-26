@@ -39,6 +39,13 @@ PATH 環境変数への追加（任意タスク）とアンインストール時
 Inno Setup 6 のインストールが必要: https://jrsoftware.org/isinfo.php
 （-SkipGui を指定した場合は、インストーラーがGUIを同梱できないため自動的に省略する。）
 
+.PARAMETER NdlOcrModelSource
+同梱する NDLOCR-Lite のモデルの取得元フォルダー。ndl-lab/ndlocr-lite のリポジトリ直下
+（src\model と src\config を含む）か、必要な5ファイルを直接置いたフォルダーを指定する。
+モデルは GUI の配布フォルダーの models\ndlocr（CLIのみの場合は CLI の配布フォルダー）へ
+コピーし、NDLOCR-Lite と DINOv3 のライセンス文書（licenses\ndlocr-lite）も添える。
+インストーラーを作る場合は必須（-InstallerOnly では既存の配置を検証する）。
+
 .PARAMETER Version
 インストーラーのバージョン。省略時は Directory.Build.props の <Version> を使う。
 
@@ -60,8 +67,8 @@ RFC 3161 タイムスタンプサーバーのURL。-Sign 指定時のみ使用�
 省略時はタイムスタンプを付けずに署名する。
 
 .EXAMPLE
-.\scripts\build-installer.ps1
-.\scripts\build-installer.ps1 -Sign
+.\scripts\build-installer.ps1 -NdlOcrModelSource D:\home\source\python\ndlocr-lite
+.\scripts\build-installer.ps1 -NdlOcrModelSource D:\home\source\python\ndlocr-lite -Sign
 .\scripts\build-installer.ps1 -Sign -CertificateThumbprint 0123456789ABCDEF0123456789ABCDEF01234567 -TimestampUrl https://timestamp.example.com
 .\scripts\build-installer.ps1 -SkipInstaller
 .\scripts\build-installer.ps1 -SingleFile
@@ -74,6 +81,7 @@ param(
     [switch]$SingleFile,
     [switch]$SkipGui,
     [switch]$SkipInstaller,
+    [string]$NdlOcrModelSource,
     [string]$Version,
     [switch]$InstallerOnly,
     [switch]$Sign,
@@ -194,6 +202,67 @@ function Assert-Built([string]$binDirectory, [string]$assemblyName, [string]$lab
     }
 }
 
+# 同梱する NDLOCR-Lite のファイル。src\EpubFabric.Pipeline\NativeNdlOcrService.cs の
+# NdlOcrModelPaths.RequiredFileNames と揃える（モデルを更新したら両方を直す）。
+$ndlOcrModelFiles = @(
+    "deim-s-1024x1024-261124.onnx",
+    "parseq-ndl-24x256-30-tiny-499epoch-261124.onnx",
+    "parseq-ndl-24x384-50-tiny-278epoch-261124.onnx",
+    "parseq-ndl-24x768-100-tiny-153epoch-261124.onnx",
+    "NDLmoji.yaml"
+)
+
+# モデルの取得元から1ファイルの場所を探す。リポジトリ直下（src\model, src\config）と
+# ファイルを直接置いたフォルダーの両方を受け付ける。
+function Find-NdlOcrModelFile([string]$source, [string]$fileName) {
+    foreach ($candidate in @(
+            (Join-Path $source $fileName),
+            (Join-Path $source "src\model\$fileName"),
+            (Join-Path $source "src\config\$fileName"))) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return $candidate
+        }
+    }
+    return $null
+}
+
+function Copy-NdlOcrModels([string]$source, [string]$destination) {
+    if (-not (Test-Path -LiteralPath $source -PathType Container)) {
+        throw "NDLOCR-Lite のモデルの取得元フォルダーが見つかりません: $source"
+    }
+
+    $missing = @()
+    $files = @()
+    foreach ($fileName in $ndlOcrModelFiles) {
+        $path = Find-NdlOcrModelFile $source $fileName
+        if ($path) { $files += $path } else { $missing += $fileName }
+    }
+    if ($missing.Count -gt 0) {
+        throw "NDLOCR-Lite のモデルが不足しています（$source）: $($missing -join ', ')"
+    }
+
+    if (Test-Path -LiteralPath $destination) {
+        Remove-Item -LiteralPath $destination -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force $destination | Out-Null
+
+    Write-Host "NDLOCR-Lite のモデルを同梱しています: $destination" -ForegroundColor Cyan
+    foreach ($file in $files) {
+        Copy-Item -LiteralPath $file -Destination $destination
+    }
+
+    # NDLOCR-Lite（CC BY 4.0）と DINOv3 License の写しをモデルに添える（DINOv3 License 1.b.i）。
+    Copy-Item -Path (Join-Path $repoRoot "licenses\ndlocr-lite\*") -Destination $destination
+}
+
+function Assert-NdlOcrModels([string]$directory) {
+    $missing = $ndlOcrModelFiles + @("LICENCE", "LICENCE_DEPENDENCEIES") |
+        Where-Object { -not (Test-Path -LiteralPath (Join-Path $directory $_) -PathType Leaf) }
+    if ($missing) {
+        throw "配布フォルダーに NDLOCR-Lite のモデルまたはライセンス文書がありません（$directory）: $($missing -join ', ')`n-NdlOcrModelSource <ndlocr-lite のフォルダー> を指定して作り直してください。"
+    }
+}
+
 $guiOutputDirectory = Join-Path $repoRoot "publish\EpubFabric.App\$Runtime"
 
 # WinUI 3 は AnyCPU でビルドできないため、RID からプラットフォームを決める。
@@ -292,6 +361,19 @@ if (-not $SkipGui) {
     }
 }
 
+# NDLOCR-Lite のモデル。インストーラーは GUI のフォルダーを {app} へ入れるため、
+# {app}\models\ndlocr になる（CLI は {app}\cli から 1つ上を探す）。
+$ndlOcrModelHost = if ($SkipGui) { $outputDirectory } else { $guiOutputDirectory }
+if ($NdlOcrModelSource) {
+    Copy-NdlOcrModels $NdlOcrModelSource (Join-Path $ndlOcrModelHost "models\ndlocr")
+}
+elseif ($buildInstaller) {
+    throw "インストーラーには NDLOCR-Lite のモデルを同梱します。-NdlOcrModelSource <ndlocr-lite のフォルダー> を指定してください。"
+}
+else {
+    Write-Host "NDLOCR-Lite のモデルを同梱しません（-NdlOcrModelSource 未指定）。この配布フォルダーは RapidOCR だけで読みます。" -ForegroundColor Yellow
+}
+
 }
 
 $signToolPath = $null
@@ -337,6 +419,7 @@ if ($buildInstaller) {
     if (-not (Test-Path (Join-Path $guiOutputDirectory "EpubFabric.exe"))) {
         throw "GUI の配布出力が見つかりません: $guiOutputDirectory（インストーラーの本体はGUIです）"
     }
+    Assert-NdlOcrModels (Join-Path $guiOutputDirectory "models\ndlocr")
 
     $installerDirectory = Join-Path $repoRoot "publish\installer"
     New-Item -ItemType Directory -Force $installerDirectory | Out-Null

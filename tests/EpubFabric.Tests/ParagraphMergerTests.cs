@@ -5,6 +5,103 @@ namespace EpubFabric.Tests;
 
 public class ParagraphMergerTests
 {
+    [Theory]
+    [InlineData(TextSourceKind.NdlOcr, 1)]
+    [InlineData(TextSourceKind.Ocr, 2)]
+    public void Merge_ScalesTightNdlOcrLineBoxesForLineSpacing(TextSourceKind source, int expectedCount)
+    {
+        // 科学2026年1月号3ページの実測値。NDLOCR-Liteの行矩形は字面の高さ（0.0116）で、
+        // 行送り0.0222に対する隙間（0.0106）が高さの0.8倍を超える。NDLOCR-Liteの行だけ
+        // 行矩形の大きさの違いを補正して連結する。同じ座標のRapidOCR行は従来どおり分ける。
+        var blocks = new List<PageBlock>
+        {
+            HorizontalLine("b1", y: 0.1210, height: 0.0116, text: "を遂行したこの論文原稿は，", source, readingOrder: 0),
+            HorizontalLine("b2", y: 0.1432, height: 0.0116, text: "や数値実験コードの生成と", source, readingOrder: 1),
+        };
+
+        var merged = new ParagraphMerger().Merge(blocks, WritingMode.Horizontal);
+
+        Assert.Equal(expectedCount, merged.Count);
+    }
+
+    [Fact]
+    public void Merge_KeepsNdlOcrParagraphSpacingApart()
+    {
+        // 補正後も、1行分の空きがある段落間は連結しない。
+        var blocks = new List<PageBlock>
+        {
+            HorizontalLine("b1", y: 0.1210, height: 0.0116, text: "前の段落の最後の行。", TextSourceKind.NdlOcr, readingOrder: 0),
+            HorizontalLine("b2", y: 0.1654, height: 0.0116, text: "次の段落の最初の行", TextSourceKind.NdlOcr, readingOrder: 1),
+        };
+
+        var merged = new ParagraphMerger().Merge(blocks, WritingMode.Horizontal);
+
+        Assert.Equal(2, merged.Count);
+    }
+
+    [Theory]
+    [InlineData(0.707, 2)]
+    [InlineData(1.0, 1)]
+    public void Merge_ConvertsVerticalColumnWidthByPageAspectForIndent(double pageAspectRatio, int expectedCount)
+    {
+        // 地理2026年1月号16ページの実測値。前の列は文末で終わり、次の列は1字下げ（ページ高さ基準0.0153）で始まる。
+        // 列の太さ（ページ幅基準0.023）をそのまま使うとしきい値が0.0207となり字下げを見逃す。
+        // 幅/高さ（約0.707）で換算すると0.0146となり、字下げとして分かれる。
+        var blocks = new List<PageBlock>
+        {
+            NdlColumn("b1", x: 0.738, y: 0.6753, width: 0.022, height: 0.2447, text: "なっており、御嶽講を専業にする", readingOrder: 0),
+            NdlColumn("b2", x: 0.700, y: 0.6753, width: 0.021, height: 0.1523, text: "人はいないそうです。", readingOrder: 1),
+            NdlColumn("b3", x: 0.660, y: 0.6906, width: 0.023, height: 0.2294, text: "講の流行った時期、山を模した", readingOrder: 2),
+            NdlColumn("b4", x: 0.621, y: 0.6757, width: 0.023, height: 0.2342, text: "ものを身近な場所につくること、", readingOrder: 3),
+        };
+
+        var merged = new ParagraphMerger().Merge(blocks, WritingMode.Vertical, pageAspectRatio);
+
+        Assert.Equal(expectedCount, merged.Count);
+        Assert.Equal("なっており、御嶽講を専業にする人はいないそうです。", merged[0].OcrText[..25]);
+    }
+
+    [Fact]
+    public void Merge_KeepsVerticalHangingIndentInsideNote()
+    {
+        // 注のぶら下がり字下げ。2列目は1字下がるが、前の列が文の途中で終わるので続きとして連結する。
+        var blocks = new List<PageBlock>
+        {
+            NdlColumn("b1", x: 0.738, y: 0.6753, width: 0.022, height: 0.2447, text: "(2)筆者は子連れのムスリマという属性", readingOrder: 0),
+            NdlColumn("b2", x: 0.700, y: 0.6906, width: 0.022, height: 0.2294, text: "から、「ダイバーシティ要員」のよう", readingOrder: 1),
+        };
+
+        var merged = new ParagraphMerger().Merge(blocks, WritingMode.Vertical, pageAspectRatio: 0.707);
+
+        Assert.Single(merged);
+    }
+
+    private static PageBlock NdlColumn(
+        string id, double x, double y, double width, double height, string text, int readingOrder) => new()
+    {
+        Id = id,
+        PageNumber = 1,
+        Bounds = new BoundingBox(x, y, width, height),
+        Type = BlockType.Body,
+        OcrText = text,
+        OcrConfidence = 0.95,
+        TextSource = TextSourceKind.NdlOcr,
+        ReadingOrder = readingOrder,
+    };
+
+    private static PageBlock HorizontalLine(
+        string id, double y, double height, string text, TextSourceKind source, int readingOrder) => new()
+    {
+        Id = id,
+        PageNumber = 1,
+        Bounds = new BoundingBox(0.08, y, 0.70, height),
+        Type = BlockType.Body,
+        OcrText = text,
+        OcrConfidence = 0.95,
+        TextSource = source,
+        ReadingOrder = readingOrder,
+    };
+
     [Fact]
     public void Merge_JoinsVerticalBodyAcrossBandsWhenTheWordIsCut()
     {

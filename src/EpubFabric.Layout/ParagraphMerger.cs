@@ -28,10 +28,27 @@ public sealed class ParagraphMerger
     /// <summary>本文行の何倍の高さならドロップキャップ（段落頭の飾り文字）とみなすか。</summary>
     private const double DropCapHeightRatio = 1.5;
 
+    /// <summary>
+    /// NDLOCR-Liteの行矩形を、行間判定でRapidOCR・PDF文字層の行矩形と同じ尺度にそろえる倍率。
+    /// </summary>
+    /// <remarks>
+    /// NDLOCR-Lite（DEIM）の行矩形は字面の高さにほぼ一致し、RapidOCRの行矩形より小さい。
+    /// 科学2026年1月号3ページの同じ本文行では、RapidOCRの高さがNDLOCR-Liteの約1.3倍
+    /// （0.0152に対して0.0116）だった。行送りは同じなので、補正しないと通常の行間が
+    /// 行高さの約0.9倍となり、<see cref="MaxLineGapRatio"/>を超えて全行が別段落になる。
+    /// </remarks>
+    private const double NdlOcrLineBoxScale = 1.3;
+
+
     /// <summary>ドロップキャップとみなす文字数の上限。</summary>
     private const int DropCapMaxLength = 2;
 
-    public List<PageBlock> Merge(List<PageBlock> blocks, WritingMode writingMode = WritingMode.Horizontal)
+    /// <param name="pageAspectRatio">
+    /// ページの幅/高さ。縦書きで字下げを判定するとき、ページ幅基準の行の太さをページ高さ基準へ換算する。
+    /// 不明なら1（換算しない）。
+    /// </param>
+    public List<PageBlock> Merge(
+        List<PageBlock> blocks, WritingMode writingMode = WritingMode.Horizontal, double pageAspectRatio = 1.0)
     {
         blocks = MergeDropCaps(blocks, writingMode);
 
@@ -45,7 +62,7 @@ public sealed class ParagraphMerger
         {
             var previous = result.Count > 0 ? result[^1] : null;
 
-            if (previous is not null && lastLine is not null && CanMerge(previous, lastLine, block, writingMode))
+            if (previous is not null && lastLine is not null && CanMerge(previous, lastLine, block, writingMode, pageAspectRatio))
             {
                 previous.OcrText = JoinLineTexts(previous.OcrText, block.OcrText);
                 previous.Bounds = Union(previous.Bounds, block.Bounds);
@@ -164,7 +181,8 @@ public sealed class ParagraphMerger
     private static double VerticalOverlap(BoundingBox a, BoundingBox b) =>
         Math.Min(a.Y + a.Height, b.Y + b.Height) - Math.Max(a.Y, b.Y);
 
-    private static bool CanMerge(PageBlock paragraph, PageBlock lastLine, PageBlock next, WritingMode writingMode)
+    private static bool CanMerge(
+        PageBlock paragraph, PageBlock lastLine, PageBlock next, WritingMode writingMode, double pageAspectRatio)
     {
         var sameExternalTitleRegion = lastLine.Type == next.Type
             && next.Type is BlockType.ChapterTitle or BlockType.SectionHeading
@@ -206,7 +224,25 @@ public sealed class ParagraphMerger
             return false;
         }
 
-        if (IsAdjacentInReadingOrder(lastBounds, nextBounds, lineHeight))
+        // 行間は、取得元による行矩形の大きさの違いをそろえた高さで比べる
+        // （字下げの判定は字面の大きさで比べるため、この補正をしない）。
+        var spacingHeight = next.TextSource == TextSourceKind.NdlOcr
+            ? lineHeight * NdlOcrLineBoxScale
+            : lineHeight;
+        // 縦書きの読み座標では、字下げ量（X）はページ高さ基準、行の太さ（Height）はページ幅基準の
+        // 比率で単位が異なる。換算しないと縦長のページでしきい値が縦横比（約1.4倍）だけ大きくなり、
+        // 1字下げを見逃す（地理2026年1月号16・17ページ）。行の太さを幅/高さの比で換算して比べる。
+        // 横書きは従来の判定を変えない（単位は同様に異なるが、しきい値が小さくなる向きで、
+        // 字下げの見逃しは確認されていない）。
+        // また縦書きでは、前の行が文末で終わっていない場合は字下げを段落の切れ目とみなさない。
+        // 注や参考文献のぶら下がり字下げ（2行目以降を下げる組み方）は文の途中で下がるため
+        // （地理2026年1月号11・29ページ）。日本語の段落は文の途中では切れない。
+        var indentThreshold = writingMode == WritingMode.Vertical
+            ? EndsSentence(lastLine.OcrText)
+                ? IndentRatio * nextBounds.Height * pageAspectRatio
+                : double.PositiveInfinity
+            : IndentRatio * nextBounds.Height;
+        if (IsAdjacentInReadingOrder(lastBounds, nextBounds, spacingHeight, indentThreshold))
         {
             return true;
         }
@@ -220,10 +256,18 @@ public sealed class ParagraphMerger
             && ContinuesMidWord(paragraph, next);
     }
 
+    /// <summary>行が文末（句点・感嘆符・疑問符・閉じ括弧など）で終わっているか。</summary>
+    private static bool EndsSentence(string text)
+    {
+        var trimmed = text.AsSpan().TrimEnd();
+        return trimmed.Length > 0 && "。．.！？!?」』）)〉》】]…：:".Contains(trimmed[^1]);
+    }
+
     /// <summary>
     /// 読み方向で次の行として素直に続いているか。段をまたぐ場合はここでは判定しない。
     /// </summary>
-    private static bool IsAdjacentInReadingOrder(BoundingBox lastBounds, BoundingBox nextBounds, double lineHeight)
+    private static bool IsAdjacentInReadingOrder(
+        BoundingBox lastBounds, BoundingBox nextBounds, double lineHeight, double indentThreshold)
     {
         // 別の段（横に並んでいる）は統合しない。
         var overlapX = Math.Min(lastBounds.X + lastBounds.Width, nextBounds.X + nextBounds.Width)
@@ -241,8 +285,9 @@ public sealed class ParagraphMerger
             return false;
         }
 
-        return nextBounds.X - lastBounds.X <= IndentRatio * nextBounds.Height;
+        return nextBounds.X - lastBounds.X <= indentThreshold;
     }
+
 
     /// <summary>
     /// 直前の段落が語の途中で終わり、次のブロックが語の続きで始まっているか。

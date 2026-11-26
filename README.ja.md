@@ -93,7 +93,7 @@ cd EpubFabric
 
 ```powershell
 .\scripts\build-installer.ps1
-# → publish\installer\EpubFabric-Setup-0.4.1.exe
+# → publish\installer\EpubFabric-Setup-0.5.0.exe
 
 # バージョンを明示する場合（既定は Directory.Build.props の <Version>）
 .\scripts\build-installer.ps1 -Version 1.0.0
@@ -183,50 +183,48 @@ dotnet run --project src\EpubFabric.Cli -- export book.efproj --format epub
 | `--ollama` | 無効 | Ollamaによる意味分類とOCR校正 |
 | `--ollama-model <model>` | `gemma4:12b` | 使用モデル |
 | `--ollama-endpoint <url>` | `http://localhost:11434` | Ollamaサーバー |
-| `--ndlocr-model-dir <dir>` | 無効 | 縦書きページを NDLOCR-Lite で認識する（[別途ダウンロード](#ndlocr-lite実験機能別途ダウンロード)） |
+| `--ndlocr-model-dir <dir>` | 同梱モデル | NDLOCR-Lite のモデルのディレクトリ（[NDLOCR-Lite](#ndlocr-lite縦書きの文字認識と読み順)） |
+| `--no-ndlocr` | 無効 | NDLOCR-Lite を使わず RapidOCR だけで読む |
+| `--ndlocr-horizontal` | 無効 | 横書きページにも NDLOCR-Lite の結果を使う（評価用の試験機能） |
 | `--backend-pages <15,21>` | 全ページ | NDLOCR-Lite を実行するページを限定する |
 
-## NDLOCR-Lite（実験機能・別途ダウンロード）
+## NDLOCR-Lite（縦書きの文字認識と読み順）
 
-縦書きページの文字認識と読み順を、国立国会図書館の [NDLOCR-Lite](https://github.com/ndl-lab/ndlocr-lite) に置き換えて試せます。地理誌の縦書き30ページでの検証では、RapidOCR に対して文字誤り率と読み順が改善しました。
+OCRが必要なページは、国立国会図書館の [NDLOCR-Lite](https://github.com/ndl-lab/ndlocr-lite) で先に読みます。縦書きと判定したページは、NDLOCR-Lite の文字認識・読み順・領域検出（図版・表組・柱・ノンブル）を使います。横書きのページは RapidOCR で読み直します。地理誌の縦書き30ページでの検証では、RapidOCR に対して文字誤り率と読み順が改善しました。
 
-**モデルは同梱していません。** 指定しなければ従来どおり RapidOCR だけで動きます。
+**インストーラーはモデルを同梱しています**（`{app}\models\ndlocr`、約150 MiB）。Python のインストールや `pip install` は不要で、モデルの実行は ONNX Runtime で行います。
 
-### 準備
+- リフロー型・固定レイアウトのどちらでも動作します
+- 平均信頼度が0.85未満、または縦書き行が60%未満の縦書きページは採用せず、RapidOCR で読み直します
+- モデルが見つからない場合は警告したうえで RapidOCR だけで読みます。**変換は失敗しません**
+- `--no-ndlocr` で NDLOCR-Lite を使わず、RapidOCR だけで読みます
+- `--ndlocr-horizontal` で横書きのページにも NDLOCR-Lite の結果を使います（評価用の試験機能）
+- `--backend-pages 15,21` で NDLOCR-Lite を実行するページを限定できます
+
+### 開発環境で使う場合
+
+ソースからビルドした実行ファイルにはモデルが入っていません。公式リポジトリをクローンし、`--ndlocr-model-dir` で指定します。
 
 ```powershell
 git clone https://github.com/ndl-lab/ndlocr-lite
-```
-
-Python のインストールや `pip install` は不要です。EpubFabric が使うのは次の5ファイルだけで、合計約150 MiB です。
-
-| ファイル | クローン内の場所 |
-|---|---|
-| `deim-s-1024x1024.onnx` | `src/model/` |
-| `parseq-ndl-24x256-30-tiny-189epoch-tegaki3-r8data-202604.onnx` | `src/model/` |
-| `parseq-ndl-24x384-50-tiny-300epoch-tegaki3-r8data-202604.onnx` | `src/model/` |
-| `parseq-ndl-24x768-100-tiny-153epoch-tegaki3-r8data-202604.onnx` | `src/model/` |
-| `NDLmoji.yaml` | `src/config/` |
-
-### 使い方
-
-```powershell
 dotnet run --project src\EpubFabric.Cli -- convert input.pdf --layout reflow --ndlocr-model-dir <クローン先>
 ```
 
-`--ndlocr-model-dir` には、クローンしたリポジトリの直下を指定します（`src\model` と `src\config` を自動で辿ります）。上記5ファイルを1か所へ集めたフォルダーを指定しても動きます。
+`--ndlocr-model-dir` には、クローンしたリポジトリの直下を指定します（`src\model` と `src\config` を自動で辿ります）。次の5ファイルを1か所へ集めたフォルダーを指定しても動きます。対応しているのは v2.0.0 のファイルです。
 
-- リフロー型（`--layout reflow`）でだけ動作します
-- RapidOCR が縦書きと判定したページでだけ実行します
-- 平均信頼度が0.85未満、または縦書き行が60%未満のページは採用せず、RapidOCR の結果に戻します
-- モデルが見つからない場合は、不足しているファイル名を警告したうえで RapidOCR に戻ります。**変換は失敗しません**
-- `--backend-pages 15,21` で対象ページを限定できます
+| ファイル | クローン内の場所 |
+|---|---|
+| `deim-s-1024x1024-261124.onnx` | `src/model/` |
+| `parseq-ndl-24x256-30-tiny-499epoch-261124.onnx` | `src/model/` |
+| `parseq-ndl-24x384-50-tiny-278epoch-261124.onnx` | `src/model/` |
+| `parseq-ndl-24x768-100-tiny-153epoch-261124.onnx` | `src/model/` |
+| `NDLmoji.yaml` | `src/config/` |
 
-EpubFabric は Python を使いません。モデルの実行は ONNX Runtime で行います。
+インストーラーを作るときは、同じクローン先を `.\scripts\build-installer.ps1 -NdlOcrModelSource <クローン先>` に渡します。
 
 ### ライセンス
 
-NDLOCR-Lite は国立国会図書館が [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) で公開しています。EpubFabric はモデルを再配布しないため、取得と利用条件の確認は利用者が行ってください。EpubFabric へ取り込んだ実装の帰属表示は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) にあります。
+NDLOCR-Lite は国立国会図書館が [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) で公開しています。レイアウト認識モデル（`deim-s-1024x1024-261124.onnx`）は Meta の DINOv3 を蒸留したモデルを使っており、NDLOCR-Lite の README は **DINOv3 License** も守るよう求めています。DINOv3 License は ITAR の対象となる用途や軍事・核・諜報などへの利用を禁じています。全文は [licenses/ndlocr-lite/LICENCE_DEPENDENCEIES](licenses/ndlocr-lite/LICENCE_DEPENDENCEIES) の末尾にあり、インストーラーはモデルと同じフォルダーにも配置します。帰属表示は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) にあります。
 
 ## 使い方（GUI）
 
@@ -292,5 +290,5 @@ docs/
 - OCR モデル: [RapidOCR](https://github.com/RapidAI/RapidOCR)（PP-OCRv6）/ [RapidOcrNet](https://github.com/BobLd/RapidOcrNet)
 - PDF レンダリング: [Docnet](https://github.com/GowenGit/docnet)（PDFium）
 - 画像処理: [OpenCvSharp](https://github.com/shimat/opencvsharp) / [SkiaSharp](https://github.com/mono/SkiaSharp)
-- 縦書きOCR（任意・別途ダウンロード）: [NDLOCR-Lite](https://github.com/ndl-lab/ndlocr-lite)（国立国会図書館、CC BY 4.0）
+- 縦書きOCR・レイアウト認識（同梱）: [NDLOCR-Lite](https://github.com/ndl-lab/ndlocr-lite)（国立国会図書館、CC BY 4.0。レイアウト認識モデルは DINOv3 License も適用）
 - 紙面高品質化（`--enhance`）の手法は、登 大遊氏の [DN_SuperBook_PDF_Converter](https://github.com/dnobori/DN_SuperBook_PDF_Converter)（AGPLv3）の紙色統計補正のアイデアを参考に、OpenCV で独自実装したものです

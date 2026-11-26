@@ -7,6 +7,28 @@
 
 ## [未リリース]
 
+## [0.5.0] - 2026-11-27
+
+### 追加
+
+- NDLOCR-Lite のモデル（v2.0.0）をインストーラーに同梱するようにした（`{app}\models\ndlocr`）。`build-installer.ps1` に取得元を指定する `-NdlOcrModelSource` を追加し、NDLOCR-Lite（CC BY 4.0）と DINOv3 License の全文を `licenses\ndlocr-lite` からモデルと同じフォルダーへ配置する
+- NDLOCR-Lite を使わない `--no-ndlocr` と、横書きページにも NDLOCR-Lite の結果を使う試験機能 `--ndlocr-horizontal` を追加した
+- NDLOCR-Lite が検出した図版・組織図・数式・化学式・表組の領域をレイアウト解析の図領域へ加え、柱・ノンブルの領域に入る行をそれぞれ柱・ノンブルとして扱うようにした
+
+### 変更
+
+- OCRが必要なページは、先に NDLOCR-Lite で読み、その結果で書字方向を判定するようにした。縦書きページは NDLOCR-Lite の結果を使い、横書きページは RapidOCR で読み直す。以前は RapidOCR を先に実行し、`--ndlocr-model-dir` を指定したリフロー型の縦書きページでだけ NDLOCR-Lite を使っていた
+- NDLOCR-Lite を固定レイアウトでも使うようにした。透明テキスト層の並びは NDLOCR-Lite の読み順に従う
+- 傾き補正後の画像を NDLOCR-Lite に渡し、座標を元画像へ戻すようにした
+- 内蔵版 NDLOCR-Lite を上流 v2.0.0 に追従させた。モデルのファイル名、縦書き行と判定する縦横比（高さが幅の0.8倍超）、句読点前後の空白の除去、同じクラス内での重なり抑制（自身の面積の90%以上が大きい領域に覆われたら捨てる）を反映した。v2.0.0 より前のモデルファイルには対応しない
+- 頭注を脚注として扱うようにした
+
+### 修正
+
+- NDLOCR-Lite の読み順で、行を XY 切断の葉へ割り当てる尺度を、行が葉に含まれる割合へ改めた。上流の `calc_iou` は行と葉の座標を取り違えている
+- NDLOCR-Lite の行が段落にまとまらず、1行ずつ別の段落になる問題を直した。NDLOCR-Lite の行矩形は字面の高さしかなく、通常の行間が段落の切れ目と判定されていた
+- 縦書きで1字下げを見逃し、前の段落とつなげてしまう問題を直した。字下げ量（ページ高さ基準）と行の太さ（ページ幅基準）を単位をそろえずに比べていた。あわせて、注のぶら下がり字下げのように文の途中で下がる行は段落を分けないようにした
+
 ## [0.4.1] - 2026-09-13
 
 ### 追加
@@ -167,7 +189,8 @@
 - Windows GUI（WinUI 3）: 変換画面と 3 ペインの校正画面
 - 配布用スクリプトと Inno Setup インストーラー
 
-[未リリース]: https://github.com/fukuyori/EpubFabric/compare/v0.4.1...HEAD
+[未リリース]: https://github.com/fukuyori/EpubFabric/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/fukuyori/EpubFabric/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/fukuyori/EpubFabric/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/fukuyori/EpubFabric/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/fukuyori/EpubFabric/compare/v0.2.4...v0.3.0

@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-27
+
+### Added
+
+- The installer now bundles the NDLOCR-Lite models (v2.0.0) in `{app}\models\ndlocr`. `build-installer.ps1` gains `-NdlOcrModelSource` to name their source, and places the NDLOCR-Lite license (CC BY 4.0) and the full DINOv3 License from `licenses\ndlocr-lite` next to the models
+- `--no-ndlocr` skips NDLOCR-Lite, and the experimental `--ndlocr-horizontal` also uses NDLOCR-Lite results on horizontal pages
+- Figure, chart, equation, chemical-formula, and table regions detected by NDLOCR-Lite are added to the layout analysis as figure regions, and lines inside running-head and folio regions are treated as running heads and folios
+
+### Changed
+
+- Pages that need OCR are first read with NDLOCR-Lite, and its lines decide the writing direction. Vertical pages use the NDLOCR-Lite result; horizontal pages are read again with RapidOCR. Previously RapidOCR ran first and NDLOCR-Lite was used only on vertical reflowable pages with `--ndlocr-model-dir`
+- NDLOCR-Lite is now used for fixed-layout output too; the transparent text layer follows its reading order
+- NDLOCR-Lite now reads the deskewed image, and its coordinates are mapped back to the original image
+- The built-in NDLOCR-Lite follows upstream v2.0.0: model file names, the aspect ratio that marks a vertical line (height above 0.8 × width), removal of spaces around Japanese punctuation, and same-class overlap suppression (a region is dropped when a larger one covers 90% or more of its area). Model files older than v2.0.0 are no longer supported
+- Headnotes are treated as footnotes
+
+### Fixed
+
+- In the NDLOCR-Lite reading order, lines are assigned to XY-cut leaves by the share of the line inside the leaf. Upstream `calc_iou` mixes the line and leaf coordinates
+- NDLOCR-Lite lines are now merged into paragraphs instead of each becoming its own paragraph. Its line boxes cover only the glyph height, so ordinary line spacing was treated as a paragraph break
+- In vertical text, a one-character indent is no longer missed and merged into the previous paragraph. The indent (page-height units) was compared with the column width (page-width units) without unit conversion. Lines indented mid-sentence, such as the hanging indents of notes, no longer start a new paragraph
+
 ## [0.4.1] - 2026-09-13
 
 ### Added
@@ -167,7 +189,8 @@ Initial release, providing a complete workflow for converting PDFs—both scanne
 - Windows GUI (WinUI 3) with conversion and three-pane proofreading screens
 - Distribution scripts and an Inno Setup installer
 
-[Unreleased]: https://github.com/fukuyori/EpubFabric/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/fukuyori/EpubFabric/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/fukuyori/EpubFabric/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/fukuyori/EpubFabric/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/fukuyori/EpubFabric/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/fukuyori/EpubFabric/compare/v0.2.4...v0.3.0

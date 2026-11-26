@@ -1,22 +1,26 @@
 namespace EpubFabric.Pipeline;
 
 // C# adaptation of reading_order/xy_cut/block_xy_cut.py from
-// ndl-lab/ndlocr-lite at d25e0d415b607ad44459ca6b95c7512a54363935.
+// ndl-lab/ndlocr-lite (unchanged between d25e0d4 and v2.0.0 ba8bb85).
 // NDLOCR-Lite: Copyright (c) 2023 National Diet Library, Japan, CC BY 4.0.
-// The algorithm (grid normalization, recursive XY cut, leaf assignment, node
-// sorting, depth-first ranking) follows the original. This adaptation replaces
-// NumPy array operations with scalar loops, adds an integral image so each cut
-// reads row and column sums in linear time, and guards the degenerate cases
-// that NumPy would resolve as inf or NaN.
+// The algorithm (grid normalization, recursive XY cut, node sorting,
+// depth-first ranking) follows the original. This adaptation replaces NumPy
+// array operations with scalar loops, adds an integral image so each cut reads
+// row and column sums in linear time, guards the degenerate cases that NumPy
+// would resolve as inf or NaN, and fixes two upstream defects: the leaf
+// assignment measure (calc_iou) and the leaf sort key (is_vertical).
 
 /// <summary>
-/// NDLOCR-Liteの再帰XY切断による読み順決定。公式Python版が各LINEの
-/// <c>ORDER</c>属性へ書き出す順位と同じ結果を返すことを目的とする。
+/// NDLOCR-Liteの再帰XY切断による読み順決定。
 /// </summary>
 /// <remarks>
-/// 公式版は<c>eval_xml</c>で<c>solve</c>の順位を<c>ORDER</c>へ書き、その後の
-/// <c>sort_lines</c>と<c>smooth_order</c>は要素の並びだけを変えて<c>ORDER</c>の値を
-/// 書き換えない。公式版と同じ順序を得るには、この<c>solve</c>相当だけを移植すればよい。
+/// 公式版から次の2点を修正している。そのため、公式版の<c>ORDER</c>とは一致しない場合がある。
+/// <list type="bullet">
+/// <item>葉への割り当て: 公式版の<c>calc_iou</c>は座標を取り違えた式のため、
+/// 行が葉に含まれる割合（<see cref="Overlap(LineBox,int,int,int,int)"/>）で判定する。</item>
+/// <item>葉の中の並べ替え: 公式版は<c>node.is_vertical</c>をメソッド呼び出しせずに評価するため
+/// 常に縦組みの順（右から左）になる。ここでは節の行の過半が縦長かどうかで縦組みと横組みを切り替える。</item>
+/// </list>
 /// </remarks>
 public static class NdlOcrXyCutReadingOrder
 {
@@ -257,24 +261,20 @@ public static class NdlOcrXyCutReadingOrder
 
         for (var i = 0; i < boxes.Length; i++)
         {
-            var best = -1;
-            var bestScore = double.NaN;
-            for (var j = 0; j < leaves.Count; j++)
+            // 同点なら先に見つかった葉（深さ優先で前にある葉）を選ぶ。公式版のnanargmaxと同じ。
+            var best = 0;
+            var bestScore = Overlap(boxes[i], leaves[0]);
+            for (var j = 1; j < leaves.Count; j++)
             {
                 var score = Overlap(boxes[i], leaves[j]);
-                if (double.IsNaN(score))
-                {
-                    continue;
-                }
-
-                if (best < 0 || score > bestScore)
+                if (score > bestScore)
                 {
                     best = j;
                     bestScore = score;
                 }
             }
 
-            leaves[best < 0 ? 0 : best].LineIndices.Add(i);
+            leaves[best].LineIndices.Add(i);
         }
     }
 
@@ -293,24 +293,26 @@ public static class NdlOcrXyCutReadingOrder
     }
 
     /// <summary>
-    /// 公式版の<c>calc_iou</c>をそのまま移した重なり量。面積の求め方が通常のIoUとは異なるが、
-    /// 割り当て結果を一致させるため式を変更しない。
+    /// 行が葉に含まれる割合（交差面積 / 行の面積）。
     /// </summary>
-    private static double Overlap(LineBox box, BlockNode node)
+    /// <remarks>
+    /// 公式版の<c>calc_iou</c>は、面積を<c>box[2] - boxes[:,0] + 1</c>のように行と葉の座標を
+    /// 取り違えて求めており、IoUにもなっていない。行がどの葉に属するかを決める量としては
+    /// 行の面積に対する交差の割合が適切なため、この式に改めた。格子化で幅または高さが0になった
+    /// 行も扱えるよう、公式版と同じく両端を含む（+1）画素数で数える。
+    /// 戻り値は0～1で、NaNにはならない。
+    /// </remarks>
+    public static double Overlap(LineBox box, int nodeX0, int nodeY0, int nodeX1, int nodeY1)
     {
-        var intersectionWidth = Math.Max(0, Math.Min(box.X1, node.X1) - Math.Max(box.X0, node.X0) + 1);
-        var intersectionHeight = Math.Max(0, Math.Min(box.Y1, node.Y1) - Math.Max(box.Y0, node.Y0) + 1);
+        var intersectionWidth = Math.Max(0, Math.Min(box.X1, nodeX1) - Math.Max(box.X0, nodeX0) + 1);
+        var intersectionHeight = Math.Max(0, Math.Min(box.Y1, nodeY1) - Math.Max(box.Y0, nodeY0) + 1);
         double intersection = (long)intersectionWidth * intersectionHeight;
-        double boxArea = (long)(box.X1 - node.X0 + 1) * (box.Y1 - node.Y0 + 1);
-        double nodeArea = (long)(node.X1 - box.X0 + 1) * (node.Y1 - box.Y0 + 1);
-        var union = boxArea + nodeArea - intersection;
-        if (union == 0)
-        {
-            return intersection == 0 ? double.NaN : double.PositiveInfinity;
-        }
-
-        return intersection / union;
+        double boxArea = (long)(box.X1 - box.X0 + 1) * (box.Y1 - box.Y0 + 1);
+        return boxArea <= 0 ? 0 : Math.Min(1.0, intersection / boxArea);
     }
+
+    private static double Overlap(LineBox box, BlockNode node) =>
+        Overlap(box, node.X0, node.Y0, node.X1, node.Y1);
 
     /// <summary>公式版の<c>sort_nodes</c>。葉の中で行を並べ、縦組みの左右分割では子を反転する。</summary>
     private static (int Lines, int VerticalLines) SortNodes(BlockNode node, LineBox[] boxes)

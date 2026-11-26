@@ -93,7 +93,7 @@ By default, `build-installer.ps1` creates a setup executable. [Inno Setup 6](htt
 
 ```powershell
 .\scripts\build-installer.ps1
-# -> publish\installer\EpubFabric-Setup-0.4.1.exe
+# -> publish\installer\EpubFabric-Setup-0.5.0.exe
 
 # Specify a version (defaults to <Version> in Directory.Build.props)
 .\scripts\build-installer.ps1 -Version 1.0.0
@@ -185,50 +185,48 @@ Main options:
 | `--ollama` | Disabled | Semantic classification and OCR correction with Ollama |
 | `--ollama-model <model>` | `gemma4:12b` | Model to use |
 | `--ollama-endpoint <url>` | `http://localhost:11434` | Ollama server |
-| `--ndlocr-model-dir <dir>` | Disabled | Recognize vertical pages with NDLOCR-Lite ([separate download](#ndlocr-lite-experimental-separate-download)) |
+| `--ndlocr-model-dir <dir>` | Bundled models | NDLOCR-Lite model directory ([NDLOCR-Lite](#ndlocr-lite-vertical-text-recognition-and-reading-order)) |
+| `--no-ndlocr` | Off | Skip NDLOCR-Lite and read with RapidOCR only |
+| `--ndlocr-horizontal` | Off | Also use NDLOCR-Lite results on horizontal pages (experimental, for evaluation) |
 | `--backend-pages <15,21>` | All pages | Restrict which pages run NDLOCR-Lite |
 
-## NDLOCR-Lite (experimental, separate download)
+## NDLOCR-Lite (vertical-text recognition and reading order)
 
-Vertical pages can be recognized and ordered with the National Diet Library's [NDLOCR-Lite](https://github.com/ndl-lab/ndlocr-lite) instead of RapidOCR. Over 30 vertical pages of a geography magazine it improved both the character error rate and the reading order.
+Pages that need OCR are first read with the National Diet Library's [NDLOCR-Lite](https://github.com/ndl-lab/ndlocr-lite). On pages judged vertical, EpubFabric uses NDLOCR-Lite's text recognition, reading order, and region detection (figures, tables, running heads, folios). Horizontal pages are read again with RapidOCR. Over 30 vertical pages of a geography magazine it improved both the character error rate and the reading order compared with RapidOCR.
 
-**The models are not bundled.** Without the option EpubFabric runs on RapidOCR alone, exactly as before.
+**The installer bundles the models** (`{app}\models\ndlocr`, about 150 MiB). No Python installation or `pip install` is needed; the models run on ONNX Runtime.
 
-### Setup
+- Works for both reflowable and fixed-layout output
+- Vertical pages whose average confidence is below 0.85, or whose vertical-line share is below 60%, are read again with RapidOCR
+- When the models are missing, EpubFabric warns and reads with RapidOCR only. **Conversion does not fail**
+- `--no-ndlocr` skips NDLOCR-Lite and reads with RapidOCR only
+- `--ndlocr-horizontal` also uses NDLOCR-Lite results on horizontal pages (experimental, for evaluation)
+- `--backend-pages 15,21` restricts which pages run NDLOCR-Lite
+
+### Development builds
+
+Executables built from source do not contain the models. Clone the official repository and pass it with `--ndlocr-model-dir`.
 
 ```powershell
 git clone https://github.com/ndl-lab/ndlocr-lite
-```
-
-Neither Python nor `pip install` is required. EpubFabric reads only these five files, about 150 MiB in total.
-
-| File | Location in the clone |
-|---|---|
-| `deim-s-1024x1024.onnx` | `src/model/` |
-| `parseq-ndl-24x256-30-tiny-189epoch-tegaki3-r8data-202604.onnx` | `src/model/` |
-| `parseq-ndl-24x384-50-tiny-300epoch-tegaki3-r8data-202604.onnx` | `src/model/` |
-| `parseq-ndl-24x768-100-tiny-153epoch-tegaki3-r8data-202604.onnx` | `src/model/` |
-| `NDLmoji.yaml` | `src/config/` |
-
-### Usage
-
-```powershell
 dotnet run --project src\EpubFabric.Cli -- convert input.pdf --layout reflow --ndlocr-model-dir <clone directory>
 ```
 
-Point `--ndlocr-model-dir` at the root of the clone; `src\model` and `src\config` are located automatically. A directory holding the five files together also works.
+Point `--ndlocr-model-dir` at the root of the clone; `src\model` and `src\config` are located automatically. A directory holding the following five files together also works. The v2.0.0 files are supported.
 
-- Only reflow output (`--layout reflow`) uses it
-- It runs only on pages RapidOCR detected as vertical
-- Pages below an average confidence of 0.85, or with fewer than 60% vertical lines, keep the RapidOCR result
-- If the models are missing, the names of the missing files are reported as a warning and RapidOCR is used instead. **The conversion does not fail**
-- `--backend-pages 15,21` restricts which pages run the backend
+| File | Location in the clone |
+|---|---|
+| `deim-s-1024x1024-261124.onnx` | `src/model/` |
+| `parseq-ndl-24x256-30-tiny-499epoch-261124.onnx` | `src/model/` |
+| `parseq-ndl-24x384-50-tiny-278epoch-261124.onnx` | `src/model/` |
+| `parseq-ndl-24x768-100-tiny-153epoch-261124.onnx` | `src/model/` |
+| `NDLmoji.yaml` | `src/config/` |
 
-EpubFabric does not use Python. The models run on ONNX Runtime.
+To build the installer, pass the same clone to `.\scripts\build-installer.ps1 -NdlOcrModelSource <clone directory>`.
 
 ### License
 
-NDLOCR-Lite is published by the National Diet Library under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). EpubFabric does not redistribute the models, so obtaining them and reviewing their terms is up to you. Attribution for the parts adapted into EpubFabric is in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+NDLOCR-Lite is published by the National Diet Library under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The layout model (`deim-s-1024x1024-261124.onnx`) distills Meta's DINOv3, and the NDLOCR-Lite README asks users to also comply with the **DINOv3 License**, which prohibits uses subject to ITAR and military, nuclear, and espionage uses, among others. The full text is at the end of [licenses/ndlocr-lite/LICENCE_DEPENDENCEIES](licenses/ndlocr-lite/LICENCE_DEPENDENCEIES), and the installer also places it next to the models. Attribution is in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 ## GUI usage
 
@@ -294,5 +292,5 @@ This project is released under the [Apache License 2.0](LICENSE). Releases up to
 - OCR models: [RapidOCR](https://github.com/RapidAI/RapidOCR) (PP-OCRv6) / [RapidOcrNet](https://github.com/BobLd/RapidOcrNet)
 - PDF rendering: [Docnet](https://github.com/GowenGit/docnet) (PDFium)
 - Image processing: [OpenCvSharp](https://github.com/shimat/opencvsharp) / [SkiaSharp](https://github.com/mono/SkiaSharp)
-- Vertical-text OCR (optional, separate download): [NDLOCR-Lite](https://github.com/ndl-lab/ndlocr-lite) (National Diet Library, CC BY 4.0)
+- Vertical-text OCR and layout detection (bundled): [NDLOCR-Lite](https://github.com/ndl-lab/ndlocr-lite) (National Diet Library, CC BY 4.0; the layout model is also under the DINOv3 License)
 - The page-enhancement method used by `--enhance` is an independent OpenCV implementation inspired by the paper-color statistical correction technique in Daiyuu Nobori's [DN_SuperBook_PDF_Converter](https://github.com/dnobori/DN_SuperBook_PDF_Converter) (AGPLv3)

@@ -144,6 +144,38 @@ public sealed class NdlOcrXyCutReadingOrderTests
         Assert.Equal(Enumerable.Range(0, boxes.Count), ranks.Order());
     }
 
+    [Fact]
+    public void Overlap_IsOneWhenLineIsInsideLeaf()
+    {
+        Assert.Equal(1.0, NdlOcrXyCutReadingOrder.Overlap(new LineBox(10, 10, 20, 50), 0, 0, 100, 100));
+    }
+
+    [Fact]
+    public void Overlap_IsZeroWhenDisjoint()
+    {
+        Assert.Equal(0.0, NdlOcrXyCutReadingOrder.Overlap(new LineBox(10, 10, 20, 50), 30, 0, 100, 100));
+    }
+
+    [Fact]
+    public void Overlap_IsFractionOfLineArea()
+    {
+        // 行は x=0..9（両端含む10画素）。葉は x=5.. なので5画素分、高さは全て重なる。
+        var overlap = NdlOcrXyCutReadingOrder.Overlap(new LineBox(0, 0, 9, 9), 5, 0, 100, 100);
+
+        Assert.Equal(0.5, overlap, precision: 10);
+    }
+
+    [Fact]
+    public void Overlap_DoesNotFavorSmallLeaves()
+    {
+        // 修正前の公式版の式は葉の大きさに左右された。行を丸ごと含む葉は、大きさにかかわらず1になる。
+        var line = new LineBox(10, 10, 20, 50);
+
+        Assert.Equal(
+            NdlOcrXyCutReadingOrder.Overlap(line, 0, 0, 1000, 1000),
+            NdlOcrXyCutReadingOrder.Overlap(line, 5, 5, 25, 55));
+    }
+
     /// <summary>右端から左へ並ぶ縦書きの列を作る。</summary>
     private static List<LineBox> Columns(int count, int top, int bottom)
     {

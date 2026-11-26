@@ -114,6 +114,7 @@ public class ExternalLineTypeClassificationTests
     [Theory]
     [InlineData("キャプション", BlockType.Caption, false)]
     [InlineData("注", BlockType.Footnote, false)]
+    [InlineData("頭注", BlockType.Footnote, false)]
     [InlineData("柱", BlockType.Header, true)]
     [InlineData("ノンブル", BlockType.PageNumber, true)]
     public void AnalyzePage_UsesLimitedExternalLineTypeHints(

@@ -28,16 +28,26 @@ public sealed class TextLayerBlockBuilder
             ? line => Transpose(line.Bounds)
             : line => line.Bounds;
 
-        var columns = layoutProfile is null || layoutProfile.UsesGenericColumnDetection
-            ? ColumnDetector.DetectColumns(validLines, boundsOf)
-            : ColumnDetector.DetectColumns(
-                validLines,
-                boundsOf,
-                layoutProfile.ColumnCount,
-                layoutProfile.GutterPosition);
+        // OCRエンジン（NDLOCR-Lite）が全行の読み順を決めている場合は、それをそのまま使う。
+        IEnumerable<TextLine> orderedLines;
+        if (validLines.Count > 0 && validLines.All(line => line.SourceReadingOrder is not null))
+        {
+            orderedLines = validLines.OrderBy(line => line.SourceReadingOrder);
+        }
+        else
+        {
+            var columns = layoutProfile is null || layoutProfile.UsesGenericColumnDetection
+                ? ColumnDetector.DetectColumns(validLines, boundsOf)
+                : ColumnDetector.DetectColumns(
+                    validLines,
+                    boundsOf,
+                    layoutProfile.ColumnCount,
+                    layoutProfile.GutterPosition);
+            orderedLines = columns
+                .SelectMany(column => column.OrderBy(line => boundsOf(line).Y).ThenBy(line => boundsOf(line).X));
+        }
 
-        return columns
-            .SelectMany(column => column.OrderBy(line => boundsOf(line).Y).ThenBy(line => boundsOf(line).X))
+        return orderedLines
             .Select((line, index) => new PageBlock
             {
                 Id = $"p{pageNumber:0000}-b{index + 1:0000}",

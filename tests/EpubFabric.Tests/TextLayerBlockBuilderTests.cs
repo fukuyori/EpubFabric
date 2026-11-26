@@ -32,6 +32,23 @@ public class TextLayerBlockBuilderTests
     }
 
     [Fact]
+    public void Build_UsesSourceReadingOrderWhenEveryLineHasOne()
+    {
+        // NDLOCR-Liteが決めた読み順は、座標による段検出より優先する。
+        var lines = new[]
+        {
+            new TextLine(new BoundingBox(0.8, 0.1, 0.03, 0.3), "三", 0.9, TextSourceKind.NdlOcr, SourceReadingOrder: 2),
+            new TextLine(new BoundingBox(0.1, 0.1, 0.03, 0.3), "一", 0.9, TextSourceKind.NdlOcr, SourceReadingOrder: 0),
+            new TextLine(new BoundingBox(0.5, 0.1, 0.03, 0.3), "二", 0.9, TextSourceKind.NdlOcr, SourceReadingOrder: 1),
+        };
+
+        var blocks = new TextLayerBlockBuilder().Build(1, lines, WritingMode.Vertical);
+
+        Assert.Equal(["一", "二", "三"], blocks.Select(block => block.OcrText));
+        Assert.Equal([0, 1, 2], blocks.Select(block => block.ReadingOrder));
+    }
+
+    [Fact]
     public void Build_TwoColumnPage_OrdersLeftColumnBeforeRightColumn()
     {
         var lines = new[]

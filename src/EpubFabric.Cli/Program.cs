@@ -391,7 +391,7 @@ static async Task<(EpubFabricProject Project, List<DocumentPage> Pages)> BuildPr
         WritingMode = writingMode,
         Language = language,
         MaxPages = maxPages,
-        NativeNdlOcr = externalBackends?.NativeNdlOcr,
+        NativeNdlOcr = externalBackends is null ? new NativeNdlOcrPipelineOptions() : externalBackends.NativeNdlOcr,
         ExternalBackendPages = externalBackends?.PageNumbers,
         Ollama = ollamaOptions is { Enabled: true }
             ? new OllamaPipelineOptions(ollamaOptions.Endpoint, ollamaOptions.Model)
@@ -497,10 +497,18 @@ static ExternalBackendOptions ParseExternalBackendOptions(Dictionary<string, str
         pageNumbers = parsed;
     }
 
+    if (options.ContainsKey("--no-ndlocr")
+        && (ndlModelDirectory is not null || options.ContainsKey("--ndlocr-horizontal")))
+    {
+        throw new ArgumentException("--no-ndlocr は --ndlocr-model-dir / --ndlocr-horizontal と同時に指定できません。");
+    }
+
     return new ExternalBackendOptions(
-        ndlModelDirectory is null
+        options.ContainsKey("--no-ndlocr")
             ? null
-            : new NativeNdlOcrPipelineOptions(Path.GetFullPath(ndlModelDirectory)),
+            : new NativeNdlOcrPipelineOptions(
+                ndlModelDirectory is null ? null : Path.GetFullPath(ndlModelDirectory),
+                UseForHorizontalPages: options.ContainsKey("--ndlocr-horizontal")),
         pageNumbers);
 }
 
@@ -522,8 +530,8 @@ static void PrintUsage()
 {
     Console.WriteLine("使い方:");
     Console.WriteLine("  epubfabric-cli info <input.pdf>");
-    Console.WriteLine("  epubfabric-cli convert <input.pdf> [<input2.pdf> ...] [--output <output.epub|出力フォルダー>] [--layout <fixed|reflow>] [--dpi <dpi>] [--enhance] [--force-ocr] [--language <code>] [--max-pages <n>] [--vertical|--horizontal] [--cover-image] [--image-quality <1-100>] [--max-image-size <px>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>] [外部バックエンド設定]");
-    Console.WriteLine("  epubfabric-cli evaluate <input.pdf> [--report <report-dir>] [--dpi <dpi>] [--max-pages <n>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>] [外部バックエンド設定]");
+    Console.WriteLine("  epubfabric-cli convert <input.pdf> [<input2.pdf> ...] [--output <output.epub|出力フォルダー>] [--layout <fixed|reflow>] [--dpi <dpi>] [--enhance] [--force-ocr] [--language <code>] [--max-pages <n>] [--vertical|--horizontal] [--cover-image] [--image-quality <1-100>] [--max-image-size <px>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>] [OCRエンジン設定]");
+    Console.WriteLine("  epubfabric-cli evaluate <input.pdf> [--report <report-dir>] [--dpi <dpi>] [--max-pages <n>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>] [OCRエンジン設定]");
     Console.WriteLine("  epubfabric-cli analyze <input.pdf> --project <book.efproj> [--dpi <dpi>] [--ollama] [--ollama-model <model>] [--ollama-endpoint <url>]");
     Console.WriteLine("  epubfabric-cli export <book.efproj> --format epub [--output <output.epub>] [--layout <fixed|reflow>] [--cover-image] [--image-quality <1-100>] [--max-image-size <px>]");
     Console.WriteLine();
@@ -540,9 +548,12 @@ static void PrintUsage()
     Console.WriteLine("  --cover-image を指定すると、リフロー型でも1ページ目をテキスト化せずページ画像のまま表紙として収録します（表紙のOCR誤読が本文へ混入するのを防げます）。");
     Console.WriteLine("  --ollama を指定すると、Ollamaによる意味分類（見出し・本文などの補正）とOCR文字列の校正を行います（既定では無効）。");
     Console.WriteLine("  --ollama-model の既定値: gemma4:12b / --ollama-endpoint の既定値: http://localhost:11434");
-    Console.WriteLine("  外部バックエンド設定（実験機能・リフロー型のみ）:");
-    Console.WriteLine("    --ndlocr-model-dir <dir> 内蔵ONNX版NDLOCR-Liteを縦書きページで試します（Pythonは不要）。");
-    Console.WriteLine("    --backend-pages <15,21> で実行ページを限定できます。");
+    Console.WriteLine("  OCRエンジン設定:");
+    Console.WriteLine("    OCRが必要なページは、同梱のNDLOCR-Lite（models\\ndlocr）で読み、縦書きページはその結果を使います。横書きページはRapidOCRで読みます。");
+    Console.WriteLine("    --ndlocr-model-dir <dir> NDLOCR-Liteのモデルのディレクトリを指定します（ndlocr-liteリポジトリの直下も可）。");
+    Console.WriteLine("    --ndlocr-horizontal      横書きページにもNDLOCR-Liteの結果を使います（評価用の試験機能）。");
+    Console.WriteLine("    --no-ndlocr              NDLOCR-Liteを使わず、RapidOCRだけで読みます。");
+    Console.WriteLine("    --backend-pages <15,21>  NDLOCR-Liteを実行するページを限定します。");
 }
 
 sealed record OllamaOptions(bool Enabled, string Endpoint, string Model);

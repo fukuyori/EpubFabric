@@ -35,9 +35,10 @@ public sealed class ConversionPipeline
         var ocrPreprocessor = new OcrImagePreprocessor();
         var inkDensityMeasurer = new LineInkDensityMeasurer();
         var pageEnhancer = options.EnhancePages ? new PageImageEnhancer() : null;
-        using var ndlOcrService = options.NativeNdlOcr is { } nativeNdlOcrOptions
-            ? new NativeNdlOcrService(nativeNdlOcrOptions)
-            : null;
+        // NDLOCR-Liteのモデル（約150MB）は、OCRが必要なページに最初に出会った時点で読み込む。
+        // 読み込めなければ警告して、以降のページはRapidOCRだけで読む。
+        NativeNdlOcrService? ndlOcrService = null;
+        var ndlOcrResolved = options.NativeNdlOcr is null;
         var info = pdfService.GetInfo(options.InputPath);
 
         // 先頭からの変換ページ数（--max-pages。試し変換・設定調整用）。
@@ -79,7 +80,7 @@ public sealed class ConversionPipeline
 
         if (options.ForceOcr)
         {
-            Report(0, "PDFのテキスト層を使わず、全ページをOCR（PP-OCRv6多言語モデル）で再認識します（--force-ocr）。");
+            Report(0, "PDFのテキスト層を使わず、全ページをOCRで再認識します（--force-ocr）。");
         }
         else
         {
@@ -89,7 +90,10 @@ public sealed class ConversionPipeline
                 var ocrPurpose = options.PreserveAllTextLines
                     ? "認識文字と行座標を透明テキスト層に使用します。"
                     : "認識文字と行座標から見出し・段組みを推定します。";
-                Report(0, $"{pagesNeedingOcr}/{pageCount} ページにテキストレイヤーがありません。OCR（PP-OCRv6多言語モデル）で{ocrPurpose}");
+                var engines = options.NativeNdlOcr is null
+                    ? "RapidOCR（PP-OCRv6多言語モデル）"
+                    : "NDLOCR-Lite（縦書き）とRapidOCR（PP-OCRv6多言語モデル）";
+                Report(0, $"{pagesNeedingOcr}/{pageCount} ページにテキストレイヤーがありません。OCR（{engines}）で{ocrPurpose}");
             }
         }
 
@@ -206,97 +210,124 @@ public sealed class ConversionPipeline
                     }
                 }
 
-                if (requiresOcr && !ocrUnavailable)
+                if (requiresOcr && !ndlOcrResolved)
                 {
+                    ndlOcrResolved = true;
+                    var service = new NativeNdlOcrService(options.NativeNdlOcr!);
                     try
                     {
-                        ocrService ??= new PageOcrService();
-                        await ocrService.InitializeAsync(new OcrModelProvisioner(), cancellationToken);
+                        service.Initialize();
+                        ndlOcrService = service;
+                        var horizontal = options.NativeNdlOcr!.UseForHorizontalPages ? "全ページ" : "縦書きページ";
+                        Report(pageNumber, $"  NDLOCR-Lite（{service.ModelDirectory}）で{horizontal}を読みます。");
+                    }
+                    catch (ExternalBackendException ex)
+                    {
+                        service.Dispose();
+                        Report(pageNumber, $"警告: {ex.Message} RapidOCRだけで読みます。");
+                    }
+                }
 
-                        // 9.3 前処理: 傾きを補正した画像でOCRし、座標は表示画像の座標系へ戻す。
-                        // 傾き補正済み画像はOCR専用で、表示・EPUB出力には使わない（原型保証）。
-                        var ocrInputPath = displayImagePath;
-                        OcrPreprocessResult? preprocess = null;
+                if (requiresOcr && (!ocrUnavailable || ndlOcrService is not null))
+                {
+                    // 9.3 前処理: 傾きを補正した画像でOCRし、座標は表示画像の座標系へ戻す。
+                    // 傾き補正済み画像はOCR専用で、表示・EPUB出力には使わない（原型保証）。
+                    var ocrInputPath = displayImagePath;
+                    OcrPreprocessResult? preprocess = null;
+                    try
+                    {
+                        preprocess = ocrPreprocessor.Preprocess(
+                            displayImagePath,
+                            Path.Combine(workDirectory, $"page-deskewed-{pageNumber:0000}.png"));
+                        if (preprocess.DeskewApplied)
+                        {
+                            ocrInputPath = preprocess.ImagePathForOcr;
+                            Report(pageNumber, $"  傾き{preprocess.SkewAngleDegrees:+0.0;-0.0}°を補正した画像でOCRします。");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // 前処理は精度向上のための補助であり、失敗しても元画像でOCRを続行する。
+                        Report(pageNumber, $"警告: OCR前処理に失敗しました（{ex.Message}）。元画像でOCRします。");
+                    }
+
+                    BoundingBox ToDisplay(BoundingBox bounds) =>
+                        preprocess is { DeskewApplied: true } ? preprocess.MapToOriginal(bounds) : bounds;
+
+                    IReadOnlyList<TextLine>? ocrLines = null;
+                    IReadOnlyList<NdlOcrRegion> ndlRegions = [];
+
+                    // NDLOCR-Liteを先に実行し、その行から書字方向を判定する。縦書き（または
+                    // 横書きにも使う設定）ならその結果を採用し、それ以外はRapidOCRで読み直す。
+                    if (ndlOcrService is not null && ShouldRunExternalBackend(pageNumber))
+                    {
                         try
                         {
-                            preprocess = ocrPreprocessor.Preprocess(
-                                displayImagePath,
-                                Path.Combine(workDirectory, $"page-deskewed-{pageNumber:0000}.png"));
-                            if (preprocess.DeskewApplied)
-                            {
-                                ocrInputPath = preprocess.ImagePathForOcr;
-                                Report(pageNumber, $"  傾き{preprocess.SkewAngleDegrees:+0.0;-0.0}°を補正した画像でOCRします。");
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            // 前処理は精度向上のための補助であり、失敗しても元画像でOCRを続行する。
-                            Report(pageNumber, $"警告: OCR前処理に失敗しました（{ex.Message}）。元画像でOCRします。");
-                        }
-
-                        var ocrResult = ocrService.RecognizePage(ocrInputPath);
-                        var ocrLines = ocrResult.Lines;
-
-                        if (preprocess is { DeskewApplied: true })
-                        {
-                            ocrLines = ocrLines
-                                .Select(line => line with { Bounds = preprocess.MapToOriginal(line.Bounds) })
+                            var ndlResult = await ndlOcrService.RecognizePageAsync(ocrInputPath, cancellationToken);
+                            var ndlLines = ndlResult.Lines
+                                .Select(line => line with { Bounds = ToDisplay(line.Bounds) })
                                 .ToList();
-                        }
+                            var ndlProfile = ResolveLayoutProfile(ndlLines);
+                            var isVertical = ndlProfile.WritingMode == WritingMode.Vertical;
+                            var ndlOptions = options.NativeNdlOcr!;
+                            var summary = $"平均信頼度{ndlResult.AverageConfidence:0.00}、縦書き行{ndlResult.VerticalLineShare:P0}";
 
-                        if (ocrResult.DroppedLineCount > 0)
-                        {
-                            Report(pageNumber, $"  低信頼のOCRゴミ行{ocrResult.DroppedLineCount}件を除外しました。");
-                        }
-
-                        var rapidLayoutProfile = ResolveLayoutProfile(ocrLines);
-                        if (!options.PreserveAllTextLines
-                            && ndlOcrService is not null
-                            && ShouldRunExternalBackend(pageNumber)
-                            && rapidLayoutProfile.WritingMode == WritingMode.Vertical)
-                        {
-                            try
+                            if (!isVertical && !ndlOptions.UseForHorizontalPages)
                             {
-                                var ndlResult = await ndlOcrService.RecognizePageAsync(
-                                    displayImagePath,
-                                    Path.Combine(workDirectory, "ndlocr", $"page-{pageNumber:0000}"),
-                                    cancellationToken);
-                                var minimumAverageConfidence = options.NativeNdlOcr!.MinimumAverageConfidence;
-                                var minimumVerticalLineShare = options.NativeNdlOcr.MinimumVerticalLineShare;
-                                if (ndlResult.AverageConfidence >= minimumAverageConfidence
-                                    && ndlResult.VerticalLineShare >= minimumVerticalLineShare)
-                                {
-                                    ocrLines = ndlResult.Lines;
-                                    Report(
-                                        pageNumber,
-                                        $"  NDLOCR-Liteの{ocrLines.Count}行を使用します"
-                                        + $"（平均信頼度{ndlResult.AverageConfidence:0.00}、縦書き{ndlResult.VerticalLineShare:P0}）。");
-                                }
-                                else
-                                {
-                                    Report(
-                                        pageNumber,
-                                        $"  NDLOCR-Lite結果を採用しません"
-                                        + $"（平均信頼度{ndlResult.AverageConfidence:0.00}、縦書き{ndlResult.VerticalLineShare:P0}）。RapidOCRへ戻します。");
-                                }
+                                Report(pageNumber, $"  横書きと判定したため、RapidOCRで読みます（NDLOCR-Lite: {summary}）。");
                             }
-                            catch (ExternalBackendException ex)
+                            else if (ndlResult.AverageConfidence < ndlOptions.MinimumAverageConfidence
+                                || (isVertical && ndlResult.VerticalLineShare < ndlOptions.MinimumVerticalLineShare))
                             {
-                                Report(pageNumber, $"警告: NDLOCR-Liteを利用できません（{ex.Message}）。RapidOCRへ戻します。");
+                                Report(pageNumber, $"  NDLOCR-Lite結果を採用しません（{summary}）。RapidOCRで読みます。");
+                            }
+                            else
+                            {
+                                ocrLines = ndlLines;
+                                ndlRegions = ndlResult.Regions
+                                    .Select(region => region with { Bounds = ToDisplay(region.Bounds) })
+                                    .ToList();
+                                Report(pageNumber, $"  NDLOCR-Liteの{ndlLines.Count}行を使用します（{summary}）。");
                             }
                         }
+                        catch (ExternalBackendException ex)
+                        {
+                            Report(pageNumber, $"警告: NDLOCR-Liteで読めませんでした（{ex.Message}）。RapidOCRで読みます。");
+                        }
+                    }
 
+                    if (ocrLines is null && !ocrUnavailable)
+                    {
+                        try
+                        {
+                            ocrService ??= new PageOcrService();
+                            await ocrService.InitializeAsync(new OcrModelProvisioner(), cancellationToken);
+
+                            var ocrResult = ocrService.RecognizePage(ocrInputPath);
+                            ocrLines = ocrResult.Lines
+                                .Select(line => line with { Bounds = ToDisplay(line.Bounds) })
+                                .ToList();
+
+                            if (ocrResult.DroppedLineCount > 0)
+                            {
+                                Report(pageNumber, $"  低信頼のOCRゴミ行{ocrResult.DroppedLineCount}件を除外しました。");
+                            }
+                        }
+                        catch (Exception ex) when (ex is OcrModelDownloadException or InvalidOperationException)
+                        {
+                            // 16章「OCRモデルがない」: OCRなしで処理を継続する。
+                            Report(pageNumber, $"警告: RapidOCRを利用できません（{ex.Message}）。");
+                            ocrUnavailable = true;
+                        }
+                    }
+
+                    if (ocrLines is not null)
+                    {
                         pageLayoutProfile = ResolveLayoutProfile(ocrLines);
                         pageWritingMode = pageLayoutProfile.WritingMode;
                         detectedPageModes.Add(pageWritingMode);
                         ReportLayout(pageNumber, pageLayoutProfile);
-                        pageBlocks = BuildTextBlocks(pageNumber, displayImagePath, ocrLines, pageLayoutProfile);
-                    }
-                    catch (Exception ex) when (ex is OcrModelDownloadException or InvalidOperationException)
-                    {
-                        // 16章「OCRモデルがない」: OCRなしで処理を継続する。
-                        Report(pageNumber, $"警告: OCRを利用できません（{ex.Message}）。");
-                        ocrUnavailable = true;
+                        pageBlocks = BuildTextBlocks(pageNumber, displayImagePath, ocrLines, pageLayoutProfile, ndlRegions);
                     }
                 }
 
@@ -456,6 +487,7 @@ public sealed class ConversionPipeline
         finally
         {
             ocrService?.Dispose();
+            ndlOcrService?.Dispose();
         }
 
         PageLayoutProfile DefaultLayoutProfile() => new(
@@ -482,6 +514,15 @@ public sealed class ConversionPipeline
             Report(pageNumber, $"  レイアウト: {direction}{columns}（信頼度{profile.Confidence:0.00}）");
         }
 
+        // ページの幅/高さ。行の座標はページに対する比率なので、縦横の単位をそろえるときに使う。
+        double PageAspectRatio(int pageNumber)
+        {
+            var page = info.Pages[pageNumber - 1];
+            return page.HeightPoints > 0 && page.WidthPoints > 0
+                ? (double)page.WidthPoints / page.HeightPoints
+                : 1.0;
+        }
+
         bool ShouldRunExternalBackend(int pageNumber) =>
             options.ExternalBackendPages is null || options.ExternalBackendPages.Contains(pageNumber);
 
@@ -491,22 +532,26 @@ public sealed class ConversionPipeline
             int pageNumber,
             string imagePath,
             IReadOnlyList<TextLine> lines,
-            PageLayoutProfile layoutProfile) =>
+            PageLayoutProfile layoutProfile,
+            IReadOnlyList<NdlOcrRegion>? ndlRegions = null) =>
             options.PreserveAllTextLines
                 ? textLayerBlockBuilder.Build(pageNumber, lines, layoutProfile.WritingMode, layoutProfile)
-                : AnalyzeLayout(pageNumber, imagePath, lines, layoutProfile);
+                : AnalyzeLayout(pageNumber, imagePath, lines, layoutProfile, ndlRegions ?? []);
 
         List<PageBlock> AnalyzeLayout(
             int pageNumber,
             string imagePath,
             IReadOnlyList<TextLine> lines,
-            PageLayoutProfile layoutProfile)
+            PageLayoutProfile layoutProfile,
+            IReadOnlyList<NdlOcrRegion> ndlRegions)
         {
             // 太字見出し検出用に行のインク密度を測る（高さが本文と同じゴシック見出し対策）。
             lines = inkDensityMeasurer.Measure(imagePath, lines);
 
             var textBounds = lines.Select(l => l.Bounds).ToList();
-            var regions = regionDetector.DetectRegions(imagePath, textBounds);
+            var regions = NdlOcrRegionMapper.Merge(
+                regionDetector.DetectRegions(imagePath, textBounds),
+                ndlRegions);
             var blocks = paragraphMerger.Merge(
                 layoutAnalyzer.AnalyzePage(
                     pageNumber,
@@ -514,7 +559,8 @@ public sealed class ConversionPipeline
                     regions,
                     layoutProfile.WritingMode,
                     layoutProfile),
-                layoutProfile.WritingMode);
+                layoutProfile.WritingMode,
+                PageAspectRatio(pageNumber));
 
             foreach (var figureBlock in blocks.Where(b => b.Type == BlockType.Figure))
             {

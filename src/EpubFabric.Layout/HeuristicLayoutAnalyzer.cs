@@ -429,7 +429,7 @@ public sealed class HeuristicLayoutAnalyzer
     private static BlockType? ClassifyExternalLineType(string? sourceType) => sourceType switch
     {
         "キャプション" => BlockType.Caption,
-        "注" or "割注" => BlockType.Footnote,
+        "注" or "割注" or "頭注" => BlockType.Footnote,
         "柱" => BlockType.Header,
         "ノンブル" => BlockType.PageNumber,
         "文書タイトル" => BlockType.ChapterTitle,

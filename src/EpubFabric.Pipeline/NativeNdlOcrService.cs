@@ -7,15 +7,20 @@ using OpenCvSharp;
 namespace EpubFabric.Pipeline;
 
 // The model pre/post-processing and recognition cascade are a C# adaptation of
-// ndl-lab/ndlocr-lite at d25e0d415b607ad44459ca6b95c7512a54363935.
+// ndl-lab/ndlocr-lite v2.0.0 at ba8bb85 (originally ported from d25e0d4).
 // NDLOCR-Lite: Copyright (c) 2023 National Diet Library, Japan, CC BY 4.0.
-// This adaptation changes the runtime, image resizing, duplicate suppression,
-// and error handling for EpubFabric. The reading order follows the upstream
-// recursive XY cut; see NdlOcrXyCutReadingOrder.
+// This adaptation changes the runtime, image resizing, and error handling for
+// EpubFabric, and returns the non-text block detections (figures, tables,
+// running heads, folios) that the upstream CLI only writes to XML. The reading
+// order follows the upstream recursive XY cut; see NdlOcrXyCutReadingOrder.
+
+/// <summary>DEIMが検出した非文字行の領域。座標はページに対する0～1の比率。</summary>
+public sealed record NdlOcrRegion(string ClassName, BoundingBox Bounds, float Confidence);
 
 /// <summary>1ページ分の認識結果。</summary>
 public sealed record NdlOcrPageResult(
     IReadOnlyList<TextLine> Lines,
+    IReadOnlyList<NdlOcrRegion> Regions,
     int ImageWidth,
     int ImageHeight)
 {
@@ -28,12 +33,39 @@ public sealed record NdlOcrPageResult(
 
 /// <summary>
 /// NDLOCR-LiteのDEIM検出器とPARSeq認識器をONNX Runtimeで直接実行する。
-/// モデルの再配布方法を確定するまでは、公式配布物のディレクトリを明示指定して使用する。
+/// モデルは配布物の <c>models\ndlocr</c> に同梱し、<c>--ndlocr-model-dir</c> で差し替えられる。
 /// </summary>
 public sealed class NativeNdlOcrService : IDisposable
 {
     private const string CharsetFileName = "NDLmoji.yaml";
     private const float DetectorConfidenceThreshold = 0.25f;
+
+    /// <summary>
+    /// 公式版 <c>_suppress_overlapping_regions</c> の既定値。同じクラスで、より大きい領域に
+    /// 自身の面積のこの割合以上が覆われる領域を捨てる。
+    /// </summary>
+    private const double OverlapSuppressionThreshold = 0.9;
+
+    /// <summary>
+    /// 公式版 <c>PARSEQ.preprocess</c> の回転判定。高さが幅の0.8倍を超える切り出しは
+    /// 縦書きとして反時計回りに90度回してから認識する（v2.0.0で <c>h&gt;w</c> から変更）。
+    /// </summary>
+    private const double VerticalCropAspectRatio = 0.8;
+
+    /// <summary>文字行ではないが、レイアウト解析へ渡す領域クラス。</summary>
+    private static readonly HashSet<string> RegionClassNames = new(StringComparer.Ordinal)
+    {
+        "block_fig", "block_ad", "block_pillar", "block_folio", "block_chart",
+        "block_eqn", "block_cfm", "block_table",
+    };
+
+    /// <summary>この領域の中心に含まれる文字行は、行クラスより領域の種別を優先する。</summary>
+    private static readonly IReadOnlyDictionary<string, string> ContainerSourceTypeNames =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["block_pillar"] = "柱",
+            ["block_folio"] = "ノンブル",
+        };
 
     private static readonly string[] ClassNames =
     [
@@ -64,9 +96,31 @@ public sealed class NativeNdlOcrService : IDisposable
         this.options = options;
     }
 
+    /// <summary>
+    /// モデルを読み込む。モデルがない・読めない場合は <see cref="ExternalBackendException"/> を投げる。
+    /// パイプラインは最初のページでこれを呼び、失敗したら以降のページでNDLOCR-Liteを使わない。
+    /// </summary>
+    public void Initialize()
+    {
+        try
+        {
+            EnsureInitialized();
+        }
+        catch (ExternalBackendException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new ExternalBackendException($"内蔵ONNX版NDLOCR-Liteを利用できません: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>実際に使うモデルのディレクトリ。初期化前はnull。</summary>
+    public string? ModelDirectory { get; private set; }
+
     public Task<NdlOcrPageResult> RecognizePageAsync(
         string imagePath,
-        string outputDirectory,
         CancellationToken cancellationToken = default)
     {
         try
@@ -105,7 +159,13 @@ public sealed class NativeNdlOcrService : IDisposable
             throw new ExternalBackendException($"NDLOCR-Liteへ渡す画像を読めません: {imagePath}");
         }
 
-        var detections = DetectLines(image);
+        var allDetections = Detect(image);
+        var regionDetections = allDetections
+            .Where(detection => RegionClassNames.Contains(detection.ClassName))
+            .ToList();
+        var detections = allDetections
+            .Where(detection => SourceTypeNames.ContainsKey(detection.ClassName))
+            .ToList();
         var recognized = new List<RecognizedLine>(detections.Count);
         foreach (var detection in detections)
         {
@@ -124,11 +184,7 @@ public sealed class NativeNdlOcrService : IDisposable
 
         var ordered = RemoveAdjacentDuplicates(AssignReadingOrder(recognized));
         var lines = ordered.Select((item, order) => new TextLine(
-            new BoundingBox(
-                item.Detection.X1 / (double)image.Width,
-                item.Detection.Y1 / (double)image.Height,
-                (item.Detection.X2 - item.Detection.X1) / (double)image.Width,
-                (item.Detection.Y2 - item.Detection.Y1) / (double)image.Height),
+            ToPageBounds(item.Detection, image.Width, image.Height),
             item.Text,
             item.Detection.Confidence,
             TextSourceKind.NdlOcr,
@@ -136,10 +192,53 @@ public sealed class NativeNdlOcrService : IDisposable
                 ? WritingMode.Vertical
                 : WritingMode.Horizontal,
             SourceReadingOrder: order,
-            SourceType: SourceTypeNames[item.Detection.ClassName])).ToList();
+            SourceType: ResolveSourceType(item.Detection, regionDetections))).ToList();
 
-        return new NdlOcrPageResult(lines, image.Width, image.Height);
+        var regions = regionDetections
+            .Select(detection => new NdlOcrRegion(
+                detection.ClassName,
+                ToPageBounds(detection, image.Width, image.Height),
+                detection.Confidence))
+            .ToList();
+
+        return new NdlOcrPageResult(lines, regions, image.Width, image.Height);
     }
+
+    private static BoundingBox ToPageBounds(Detection detection, int width, int height) => new(
+        detection.X1 / (double)width,
+        detection.Y1 / (double)height,
+        detection.Width / (double)width,
+        detection.Height / (double)height);
+
+    /// <summary>
+    /// 行の中心が柱・ノンブル領域に入る場合はその種別を、そうでなければ行クラスの種別を返す。
+    /// 公式版の <c>get_relationship_rect</c> と同じく中心点で包含を判定する。
+    /// </summary>
+    public static string ResolveSourceType(string lineClassName, int x1, int y1, int x2, int y2, IEnumerable<(string ClassName, int X1, int Y1, int X2, int Y2)> regions)
+    {
+        var centerX = (x1 + x2) / 2;
+        var centerY = (y1 + y2) / 2;
+        foreach (var region in regions)
+        {
+            if (ContainerSourceTypeNames.TryGetValue(region.ClassName, out var containerType)
+                && centerX >= region.X1 && centerX <= region.X2
+                && centerY >= region.Y1 && centerY <= region.Y2)
+            {
+                return containerType;
+            }
+        }
+
+        return SourceTypeNames[lineClassName];
+    }
+
+    private static string ResolveSourceType(Detection line, IReadOnlyList<Detection> regions) =>
+        ResolveSourceType(
+            line.ClassName,
+            line.X1,
+            line.Y1,
+            line.X2,
+            line.Y2,
+            regions.Select(region => (region.ClassName, region.X1, region.Y1, region.X2, region.Y2)));
 
     private void EnsureInitialized()
     {
@@ -148,7 +247,11 @@ public sealed class NativeNdlOcrService : IDisposable
             return;
         }
 
-        var paths = NdlOcrModelPaths.Resolve(options.ModelDirectory);
+        var directory = options.ModelDirectory
+            ?? NdlOcrModelPaths.FindBundledDirectory(AppContext.BaseDirectory)
+            ?? throw new ExternalBackendException(
+                "同梱のNDLOCR-Liteモデル（models\\ndlocr）が見つかりません。--ndlocr-model-dir で指定できます。");
+        var paths = NdlOcrModelPaths.Resolve(directory);
         using var sessionOptions = new SessionOptions
         {
             GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
@@ -166,6 +269,7 @@ public sealed class NativeNdlOcrService : IDisposable
             newRecognizer100 = new Recognizer(paths.Recognizer100Path, charset);
 
             detector = newDetector;
+            ModelDirectory = Path.GetDirectoryName(paths.DetectorPath);
             recognizer30 = newRecognizer30;
             recognizer50 = newRecognizer50;
             recognizer100 = newRecognizer100;
@@ -180,7 +284,7 @@ public sealed class NativeNdlOcrService : IDisposable
         }
     }
 
-    private List<Detection> DetectLines(Mat image)
+    private List<Detection> Detect(Mat image)
     {
         var side = Math.Max(image.Width, image.Height);
         using var padded = Mat.Zeros(side, side, MatType.CV_8UC3).ToMat();
@@ -223,7 +327,7 @@ public sealed class NativeNdlOcrService : IDisposable
             }
 
             var className = ClassNames[classIndex];
-            if (!SourceTypeNames.ContainsKey(className))
+            if (!SourceTypeNames.ContainsKey(className) && !RegionClassNames.Contains(className))
             {
                 continue;
             }
@@ -247,7 +351,10 @@ public sealed class NativeNdlOcrService : IDisposable
                 checked((int)charCounts[i])));
         }
 
-        return RemoveDuplicateDetections(detections);
+        var keep = SuppressOverlappingRegions(detections
+            .Select(item => new DetectionBox(item.ClassName, item.X1, item.Y1, item.X2, item.Y2))
+            .ToList());
+        return keep.Select(index => detections[index]).ToList();
     }
 
     private string RecognizeCascade(Mat image, Detection detection)
@@ -341,29 +448,82 @@ public sealed class NativeNdlOcrService : IDisposable
             : kept.Select(index => ordered[index]).ToList();
     }
 
-    private static List<Detection> RemoveDuplicateDetections(IReadOnlyList<Detection> detections)
+    /// <summary>重なり抑制の入力。座標はページ画像の画素単位。</summary>
+    public readonly record struct DetectionBox(string ClassName, int X1, int Y1, int X2, int Y2)
     {
-        var kept = new List<Detection>();
-        foreach (var detection in detections.OrderByDescending(item => item.Confidence))
+        public long Area => (long)Math.Max(0, X2 - X1) * Math.Max(0, Y2 - Y1);
+    }
+
+    /// <summary>
+    /// 公式版 v2.0.0 の <c>_suppress_overlapping_regions</c>。同じクラスの中で面積の大きい順に
+    /// 調べ、すでに残した自分より大きい領域に自身の面積の90%以上が覆われる領域を捨てる。
+    /// 戻り値は残す検出の添字で、入力の順序を保つ。
+    /// </summary>
+    public static IReadOnlyList<int> SuppressOverlappingRegions(IReadOnlyList<DetectionBox> boxes)
+    {
+        var keptByClass = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        var suppressed = new HashSet<int>();
+
+        // 公式版はPythonの安定ソート（sorted, reverse=True）なので、同じ面積は入力順を保つ。
+        var byArea = Enumerable.Range(0, boxes.Count)
+            .OrderByDescending(index => boxes[index].Area)
+            .ToList();
+        foreach (var index in byArea)
         {
-            if (kept.Any(item => IntersectionOverUnion(item, detection) >= 0.90))
+            var box = boxes[index];
+            if (box.Area <= 0)
             {
+                // 公式版は面積0の検出を残す側にも抑制する側にも入れない（出力には残る）。
                 continue;
             }
 
-            kept.Add(detection);
+            if (!keptByClass.TryGetValue(box.ClassName, out var kept))
+            {
+                kept = [];
+                keptByClass[box.ClassName] = kept;
+            }
+
+            var isSuppressed = false;
+            foreach (var otherIndex in kept)
+            {
+                var other = boxes[otherIndex];
+                if (other.Area <= box.Area)
+                {
+                    continue;
+                }
+
+                var intersection = (long)Math.Max(0, Math.Min(box.X2, other.X2) - Math.Max(box.X1, other.X1))
+                    * Math.Max(0, Math.Min(box.Y2, other.Y2) - Math.Max(box.Y1, other.Y1));
+                if ((double)intersection / box.Area >= OverlapSuppressionThreshold)
+                {
+                    isSuppressed = true;
+                    break;
+                }
+            }
+
+            if (isSuppressed)
+            {
+                suppressed.Add(index);
+            }
+            else
+            {
+                kept.Add(index);
+            }
         }
 
-        return kept;
+        return Enumerable.Range(0, boxes.Count).Where(index => !suppressed.Contains(index)).ToList();
     }
 
-    private static double IntersectionOverUnion(Detection left, Detection right)
+    /// <summary>公式版 v2.0.0 の <c>_remove_ascii_spaces_around_japanese_punctuation</c>。</summary>
+    public static string RemoveSpacesAroundJapanesePunctuation(string text)
     {
-        var intersectionWidth = Math.Max(0, Math.Min(left.X2, right.X2) - Math.Max(left.X1, right.X1));
-        var intersectionHeight = Math.Max(0, Math.Min(left.Y2, right.Y2) - Math.Max(left.Y1, right.Y1));
-        var intersection = intersectionWidth * intersectionHeight;
-        var union = (left.Width * left.Height) + (right.Width * right.Height) - intersection;
-        return union <= 0 ? 0 : intersection / (double)union;
+        foreach (var punctuation in "、。")
+        {
+            text = text.Replace($" {punctuation}", punctuation.ToString(), StringComparison.Ordinal);
+            text = text.Replace($"{punctuation} ", punctuation.ToString(), StringComparison.Ordinal);
+        }
+
+        return text;
     }
 
     private static string LoadCharset(string path)
@@ -424,8 +584,9 @@ public sealed class NativeNdlOcrService : IDisposable
 
         public string Read(Mat source)
         {
-            using var oriented = source.Height > source.Width ? new Mat() : source.Clone();
-            if (source.Height > source.Width)
+            var rotate = source.Height > source.Width * VerticalCropAspectRatio;
+            using var oriented = rotate ? new Mat() : source.Clone();
+            if (rotate)
             {
                 Cv2.Rotate(source, oriented, RotateFlags.Rotate90Counterclockwise);
             }
@@ -474,7 +635,7 @@ public sealed class NativeNdlOcrService : IDisposable
                 }
             }
 
-            return text.ToString();
+            return RemoveSpacesAroundJapanesePunctuation(text.ToString());
         }
 
         public void Dispose() => session.Dispose();
@@ -522,9 +683,43 @@ public sealed record NdlOcrModelPaths(
         yield return CharsetPath;
     }
 
-    private const string DetectorFileName = "deim-s-1024x1024.onnx";
-    private const string Recognizer30FileName = "parseq-ndl-24x256-30-tiny-189epoch-tegaki3-r8data-202604.onnx";
-    private const string Recognizer50FileName = "parseq-ndl-24x384-50-tiny-300epoch-tegaki3-r8data-202604.onnx";
-    private const string Recognizer100FileName = "parseq-ndl-24x768-100-tiny-153epoch-tegaki3-r8data-202604.onnx";
+    /// <summary>
+    /// 既定のモデル配置先を探す。インストーラーは <c>{app}\models\ndlocr</c> へ置き、
+    /// GUIは <c>{app}</c>、CLIは <c>{app}\cli</c> から起動するため、実行ファイルの隣と
+    /// 1つ上の両方を調べる。見つからなければ null を返す。
+    /// </summary>
+    public static string? FindBundledDirectory(string baseDirectory)
+    {
+        foreach (var candidate in new[]
+        {
+            Path.Combine(baseDirectory, "models", "ndlocr"),
+            Path.Combine(baseDirectory, "..", "models", "ndlocr"),
+        })
+        {
+            var fullPath = Path.GetFullPath(candidate);
+            if (File.Exists(Path.Combine(fullPath, DetectorFileName)))
+            {
+                return fullPath;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>同梱・指定ディレクトリに必要なファイル名（配布スクリプトの検証にも使う）。</summary>
+    public static IReadOnlyList<string> RequiredFileNames { get; } =
+    [
+        DetectorFileName,
+        Recognizer30FileName,
+        Recognizer50FileName,
+        Recognizer100FileName,
+        CharsetFileName,
+    ];
+
+    // ndl-lab/ndlocr-lite v2.0.0 (ba8bb85) の src/model と src/config に含まれるファイル名。
+    private const string DetectorFileName = "deim-s-1024x1024-261124.onnx";
+    private const string Recognizer30FileName = "parseq-ndl-24x256-30-tiny-499epoch-261124.onnx";
+    private const string Recognizer50FileName = "parseq-ndl-24x384-50-tiny-278epoch-261124.onnx";
+    private const string Recognizer100FileName = "parseq-ndl-24x768-100-tiny-153epoch-261124.onnx";
     private const string CharsetFileName = "NDLmoji.yaml";
 }

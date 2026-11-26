@@ -69,6 +69,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 ; Windowsのファイル名は大文字小文字を区別しないため、EpubFabric.exe が epubfabric で見つかる。
 ; CLIは補助ツール（epubfabric-cli.exe）として cli\ 配下に分ける。双方が自己完結型で
 ; ランタイムDLLの同名ファイルを持つため、同じフォルダーには混在させない。
+; GUIの配布フォルダーには NDLOCR-Lite のモデルとライセンス文書（models\ndlocr）も含まれる。
 Source: "{#GuiPublishDir}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 Source: "{#PublishDir}\*"; DestDir: "{app}\cli"; Flags: recursesubdirs ignoreversion
 ; Apache License 2.0 の4(a)(d)により、配布物へライセンス本文とNOTICEを含める。
