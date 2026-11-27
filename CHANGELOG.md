@@ -189,18 +189,17 @@ Initial release, providing a complete workflow for converting PDFs—both scanne
 - Windows GUI (WinUI 3) with conversion and three-pane proofreading screens
 - Distribution scripts and an Inno Setup installer
 
-[Unreleased]: https://github.com/fukuyori/EpubFabric/compare/v0.5.0...HEAD
-[0.5.0]: https://github.com/fukuyori/EpubFabric/compare/v0.4.1...v0.5.0
-[0.4.1]: https://github.com/fukuyori/EpubFabric/compare/v0.4.0...v0.4.1
-[0.4.0]: https://github.com/fukuyori/EpubFabric/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/fukuyori/EpubFabric/compare/v0.2.4...v0.3.0
-[0.2.4]: https://github.com/fukuyori/EpubFabric/compare/v0.2.3...v0.2.4
-[0.2.3]: https://github.com/fukuyori/EpubFabric/compare/v0.2.2...v0.2.3
-[0.2.2]: https://github.com/fukuyori/EpubFabric/compare/v0.2.1...v0.2.2
-[0.2.1]: https://github.com/fukuyori/EpubFabric/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/fukuyori/EpubFabric/compare/v0.1.4...v0.2.0
-[0.1.4]: https://github.com/fukuyori/EpubFabric/compare/v0.1.3...v0.1.4
-[0.1.3]: https://github.com/fukuyori/EpubFabric/compare/v0.1.2...v0.1.3
-[0.1.2]: https://github.com/fukuyori/EpubFabric/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/fukuyori/EpubFabric/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/fukuyori/EpubFabric/releases/tag/v0.1.0
+[Unreleased]: https://github.com/fukuyori/EpubFabric/compare/0.5.0...HEAD
+[0.5.0]: https://github.com/fukuyori/EpubFabric/compare/dcd4c23...0.5.0
+[0.4.1]: https://github.com/fukuyori/EpubFabric/compare/0.4.0...dcd4c23
+[0.4.0]: https://github.com/fukuyori/EpubFabric/compare/0.3.0...0.4.0
+[0.3.0]: https://github.com/fukuyori/EpubFabric/compare/0.2.3...0.3.0
+[0.2.3]: https://github.com/fukuyori/EpubFabric/compare/8b9d55b...0.2.3
+[0.2.2]: https://github.com/fukuyori/EpubFabric/compare/2217a87...8b9d55b
+[0.2.1]: https://github.com/fukuyori/EpubFabric/compare/3ebd31c...2217a87
+[0.2.0]: https://github.com/fukuyori/EpubFabric/compare/eab2b0d...3ebd31c
+[0.1.4]: https://github.com/fukuyori/EpubFabric/compare/a9ecaf5...eab2b0d
+[0.1.3]: https://github.com/fukuyori/EpubFabric/compare/c033cd8...a9ecaf5
+[0.1.2]: https://github.com/fukuyori/EpubFabric/compare/bc0b6b3...c033cd8
+[0.1.1]: https://github.com/fukuyori/EpubFabric/compare/v0.1.0...bc0b6b3
+[0.1.0]: https://github.com/fukuyori/EpubFabric/tree/v0.1.0

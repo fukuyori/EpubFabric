@@ -66,7 +66,10 @@ if ($Clean) {
 }
 
 Write-Host "復元しています..." -ForegroundColor Cyan
-dotnet restore $solution
+# 構成を渡して復元する。GUI は Release で PublishReadyToRun を有効にし、そのために
+# ランタイムパックを要する。構成なし（Debug 扱い）で復元すると取得されず、続く
+# --no-restore の Release ビルドが NETSDK1112 で失敗する。
+dotnet restore $solution -p:Configuration=$Configuration
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet restore が失敗しました。"
 }

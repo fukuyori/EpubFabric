@@ -1,5 +1,5 @@
 <Project>
-  <!-- 全プロジェクト共通のバージョン。リリース時はここを更新し、同じ番号の git タグ（v0.1.0 形式）を打つ。 -->
+  <!-- 全プロジェクト共通のバージョン。リリース時はここを更新し、同じ番号の git タグ（0.5.0 のように v なし。docs/version-update-checklist.md 参照）を打つ。 -->
   <PropertyGroup>
     <Version>0.5.0</Version>
   </PropertyGroup>
